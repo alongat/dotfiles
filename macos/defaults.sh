@@ -12,3 +12,9 @@ defaults write NSGlobalDomain "AppleShowAllExtensions" -bool "true"
 
 # Clean trashbin after 30 days
 defaults write com.apple.finder "FXRemoveOldTrashItems" -bool "true"
+
+# Three finger drag
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad "TrackpadThreeFingerDrag" -bool "true"
+
+# Tap to click
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad "Clicking" -bool "true"
