@@ -49,6 +49,7 @@ brew 'mas'
 brew 'iterm2'
 brew 'notion'
 brew 'jira-cli'
+brew 'rectangle'
 
 # Casks
 cask 'alacritty'
@@ -67,7 +68,7 @@ cask 'tableplus'
 cask 'transmission'
 cask 'whatsapp'
 cask 'zoom'
-cask 'lens'
+cask 'openlens'
 cask 'kap'
 cask 'alfred'
 cask 'raycast'
@@ -78,6 +79,9 @@ cask 'fig'
 cask 'goland'
 cask 'visual-studio-code'
 cask 'spotify'
+cask 'arc'
+cask 'hiddenbar'
+
 
 # Fonts
 cask 'font-fira-code'
