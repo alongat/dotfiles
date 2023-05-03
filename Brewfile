@@ -8,6 +8,7 @@ tap 'bufbuild/buf'
 tap 'ankitpokhrel/jira-cli' # JIRA
 
 # Brews
+brew 'ruby'
 brew 'bat'
 brew 'bat'
 brew 'buf'
