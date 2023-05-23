@@ -9,6 +9,7 @@ tap 'ankitpokhrel/jira-cli' # JIRA
 
 # Brews
 brew 'ruby'
+brew 'rbenv'
 brew 'bat'
 brew 'bat'
 brew 'buf'
