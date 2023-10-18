@@ -1,6 +1,5 @@
 # Fig pre block. Keep at the top of this file.
 [[ -f "$HOME/.fig/shell/zshrc.pre.zsh" ]] && builtin source "$HOME/.fig/shell/zshrc.pre.zsh"
-# Dotfiles location
 DOTFILES=$HOME/.dotfiles
 
 # Support ARM64 and AMD64 macOS.
@@ -20,7 +19,7 @@ fi
 # PATH
 export PATH="$BREW_PATH/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-export PATH="{$HOME}/.local/bin:$PATH"
+export PATH="{$HOME}/.fig/bin:$PATH"
 
 eval "$(rbenv init - zsh)"
 
@@ -72,6 +71,8 @@ export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 
 # Fig post block. Keep at the bottom of this file.
 [[ -f "$HOME/.fig/shell/zshrc.post.zsh" ]] && builtin source "$HOME/.fig/shell/zshrc.post.zsh"

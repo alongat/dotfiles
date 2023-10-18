@@ -7,10 +7,14 @@ readonly ISSUE=$(
 		--preview "echo {} | awk '{print $1}' | xargs jira issue view"
 )
 
+if [ "$1" == "-d" ]; then
+   draft="--draft"
+fi 
+
 if [[ -z $ISSUE ]]; then
 	gh pr create \
 	--assignee @me \
-	--draft
+	$draft
 fi
 
 readonly JIRA_URL="https://${JIRA_ORG}.atlassian.net/browse"
@@ -22,6 +26,6 @@ git commit --allow-empty -m "$ISSUE_TITLE"
 
 gh pr create \
 	--assignee @me \
-	--draft \
+  $draft \
 	--title "$ISSUE_NUMBER:$ISSUE_TITLE" \
 	--body "[Ticket]($JIRA_URL/$ISSUE_NUMBER): ${ISSUE_TITLE}"
