@@ -49,6 +49,8 @@ brew 'watch'
 brew 'zoxide'
 brew 'mas'
 brew 'jira-cli'
+brew 'argocd'
+brew 'kubectl-argo-rollouts'
 
 # Casks
 cask 'rectangle'
