@@ -6,11 +6,12 @@ tap 'homebrew/cask-fonts'
 tap 'hashicorp/tap'
 tap 'bufbuild/buf'
 tap 'ankitpokhrel/jira-cli' # JIRA
+tap 'charmbracelet/tap/mods'
 
 # Brews
 brew 'ruby'
 brew 'gnu-sed'
-berw 'coreutils'
+brew 'coreutils'
 brew 'rbenv'
 brew 'bat'
 brew 'bat'
@@ -52,6 +53,8 @@ brew 'jira-cli'
 brew 'argocd'
 brew 'kubectl-argo-rollouts'
 brew 'choosy'
+brew 'glow'
+brew 'zed'
 
 # Casks
 cask 'rectangle'

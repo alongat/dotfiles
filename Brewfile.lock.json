@@ -2129,10 +2129,8 @@
           }
         }
       },
-      "iterm2": {
-      },
-      "notion": {
-      },
+      "iterm2": {},
+      "notion": {},
       "ruby": {
         "version": "3.2.2_1",
         "bottle": {
@@ -2233,12 +2231,6 @@
       }
     },
     "cask": {
-      "1password": {
-        "version": "8.9.8",
-        "options": {
-          "full_name": "1password"
-        }
-      },
       "alacritty": {
         "version": "0.12.2",
         "options": {

@@ -1,4 +1,4 @@
-source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
+source "$(brew --prefix)/share/google-cloud-sdk/completion.zsh.inc"
 
 function __g {
 	_arguments "1: :($(gcloud config configurations list --format='value(name)'))"
