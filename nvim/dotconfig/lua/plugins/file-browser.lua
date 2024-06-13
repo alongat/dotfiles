@@ -12,6 +12,11 @@ return {
       defaults = {
         file_ignore_patterns = {},
       },
+      picker = {
+        find_files = {
+          hidden = true,
+        },
+      },
       extensions = {
         file_browser = {
           hidden = true,
