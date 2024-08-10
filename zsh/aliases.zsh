@@ -1,4 +1,6 @@
 alias reload!=". ~/.zshrc"
 alias ..="cd .."
 alias ...="cd ../.."
-alias ll="ls -la"
+alias ls="eza --color=always --git --no-user --no-permissions --icons=always --group-directories-first"
+alias ll="ls --long"
+alias c="clear"
