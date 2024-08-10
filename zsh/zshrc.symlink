@@ -1,3 +1,5 @@
+# zmodload zsh/zprof
+
 # Q pre block. Keep at the top of this file.
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh"
 DOTFILES=$HOME/.dotfiles
@@ -76,3 +78,5 @@ export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 
 # Q post block. Keep at the bottom of this file.
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
+
+# zprof

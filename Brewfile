@@ -86,6 +86,7 @@ cask 'hiddenbar'
 cask 'notion'
 
 # Fonts
+cask 'font-monaspace'
 cask 'font-fira-code'
 cask 'font-fira-code-nerd-font'
 
