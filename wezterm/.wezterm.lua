@@ -17,6 +17,8 @@ config.macos_window_background_blur = 50
 config.keys = {
 	{ key = "RightArrow", mods = "ALT", action = wezterm.action({ SendKey = { key = "f", mods = "ALT" } }) },
 	{ key = "LeftArrow", mods = "ALT", action = wezterm.action({ SendKey = { key = "b", mods = "ALT" } }) },
+	{ key = "k", mods = "CMD", action = wezterm.action.ClearScrollback("ScrollbackAndViewport") },
+	{ key = "K", mods = "CMD", action = wezterm.action.ClearScrollback("ScrollbackOnly") },
 }
 
 return config
