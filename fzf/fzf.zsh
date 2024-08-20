@@ -42,8 +42,6 @@ _fzf_comprun() {
 
 # ----- Bat (better cat) -----
 
-export BAT_THEME=tokyonight_night
-
 fedit() {
     local file=$(
       fzf --query="$1" --no-multi --select-1 --exit-0 \
