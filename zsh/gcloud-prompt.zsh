@@ -69,4 +69,3 @@ function _update_gcloud_prompt() {
 
 add-zsh-hook precmd _update_gcloud_prompt
 
-_update_gcloud_prompt
