@@ -78,3 +78,6 @@ export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
 
 # zprof
+
+# Created by `pipx` on 2024-10-28 20:02:35
+export PATH="$PATH:/Users/alongat/.local/bin"
