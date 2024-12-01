@@ -59,7 +59,7 @@ brew 'kubectl-argo-rollouts'
 brew 'glow'
 
 # Casks
-cask 'rectangle'
+cask 'chatgpt'
 cask 'firefox'
 cask 'wezterm'
 cask 'iterm2'

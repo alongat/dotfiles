@@ -7,9 +7,9 @@ if [[ $(wc -l <~/.kube/config) -gt 0 ]] && [[ $(cat ~/.kube/config | grep prdeu 
   gcloud container clusters get-credentials sp-development --region europe-west1 --project stackpulse-development
   gcloud container clusters get-credentials sp-staging --region europe-west1 --project stackpulse-staging
   gcloud container clusters get-credentials sp-production --region us-central1 --project stackpulse-production
-  gcloud container clusters get-credentials steps --region europe-west1 --project torqio-stg-steps
+  gcloud container clusters get-credentials steps-staging --region europe-west1 --project torqio-stg-steps
   gcloud container clusters get-credentials sp-playbooks --region us-central1 --project stackpulse-playbooks
-  gcloud container clusters get-credentials demo-cluster --region us-central1 --project stackpulse-demo
+  gcloud container clusters get-credentials steps-production-us-central1 --region us-central1 --project stackpulse-playbooks
   gcloud container clusters get-credentials torqio-steps --region europe-west3 --project torqio-eu-steps
   gcloud container clusters get-credentials torq-production --region europe-west3 --project torqio-eu-production
   # rename
