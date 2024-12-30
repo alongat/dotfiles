@@ -77,6 +77,7 @@ cask 'arc'
 cask 'hiddenbar'
 cask 'notion'
 cask 'chatbox'
+cask 'ghostty'
 
 # Fonts
 cask 'font-monaspace'
