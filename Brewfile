@@ -54,6 +54,7 @@ brew 'tlrc'
 brew 'kubectl-argo-rollouts'
 # brew 'choosy'
 brew 'glow'
+brew 'aichat'
 
 # Casks
 cask 'wezterm'
