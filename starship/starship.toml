@@ -4,10 +4,12 @@
 right_format = """$kubernetes"""
 
 [kubernetes]
-format = 'on [$context \($namespace\)](dimmed red) '
+format = '☸ [$context \($namespace\)]($style)'
 disabled = false
 contexts = [
-  { context_pattern = "production", style = "red", symbol = "💔 " },
+  { context_pattern = "prd.*", style = "red", symbol = "💔 " },
+  { context_pattern = "stg", style = "yellow", symbol = "💔 " },
+  { context_pattern = "dev", style = "green", symbol = "💔 " },
 ]
 
 [gcloud]
