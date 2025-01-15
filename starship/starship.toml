@@ -1,0 +1,26 @@
+# ~/.config/starship.toml
+
+# move the rest of the prompt to the right
+right_format = """$kubernetes"""
+
+[kubernetes]
+format = 'on [$context \($namespace\)](dimmed red) '
+disabled = false
+contexts = [
+  { context_pattern = "production", style = "red", symbol = "💔 " },
+]
+
+[gcloud]
+disabled = true
+
+[buf]
+disabled = true
+
+[line_break]
+disabled = true
+
+[git_status]
+ahead = '⇡${count}'
+diverged = '⇕⇡${ahead_count}⇣${behind_count}'
+behind = '⇣${count}'
+

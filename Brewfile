@@ -55,6 +55,7 @@ brew 'kubectl-argo-rollouts'
 # brew 'choosy'
 brew 'glow'
 brew 'aichat'
+brew 'starship'
 
 # Casks
 cask 'wezterm'
