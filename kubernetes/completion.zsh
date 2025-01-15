@@ -9,8 +9,8 @@ function __k {
 
 compdef __k k
 
-# Minikube
-if which minikube > /dev/null 2>&1
-then
-	source <(minikube completion zsh)
-fi
+# Minikube -- Removed as it's slow
+# if which minikube > /dev/null 2>&1
+# then
+# 	source <(minikube completion zsh)
+# fi
