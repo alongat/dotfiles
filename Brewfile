@@ -1,9 +1,8 @@
 # Taps
-tap 'homebrew/bundle'
-tap 'homebrew/services'
 tap 'hashicorp/tap'
 tap 'bufbuild/buf'
 tap 'ankitpokhrel/jira-cli'
+tap 'sst/tap'
 
 # System Utilities
 brew 'coreutils'        # GNU core utilities (better versions of basic commands)
