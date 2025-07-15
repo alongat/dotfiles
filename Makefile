@@ -32,14 +32,27 @@ dotfiles: backup
 	@echo "› Dotfiles installation completed"
 
 install:
-	@echo "› Running install scripts"
+	@echo "› Installing Homebrew"
+	@if [ -f ./brew/install.sh ]; then \
+		echo "  Running brew/install.sh"; \
+		sh -c "./brew/install.sh" || { echo "ERROR: Homebrew installation failed"; exit 1; }; \
+	else \
+		echo "WARNING: brew/install.sh not found, skipping Homebrew installation"; \
+	fi
+	@echo "› Running brew bundle"
+	@if command -v brew >/dev/null 2>&1; then \
+		brew bundle || { echo "ERROR: Brew bundle failed"; exit 1; }; \
+	else \
+		echo "ERROR: Homebrew not available for brew bundle"; exit 1; \
+	fi
+	@echo "› Running remaining install scripts"
 	@if [ ! -d ~/.config ]; then \
 		echo "  Creating ~/.config directory"; \
 		mkdir -p ~/.config || { echo "ERROR: Failed to create ~/.config"; exit 1; }; \
 	fi
 	@install_count=0; \
 	failed_count=0; \
-	for script in $$(find . -name install.sh); do \
+	for script in $$(find . -name install.sh | grep -v './brew/install.sh'); do \
 		echo "  Running $$script"; \
 		if sh -c "$$script"; then \
 			install_count=$$((install_count + 1)); \
@@ -50,12 +63,6 @@ install:
 	done; \
 	echo "› Install scripts completed: $$install_count succeeded, $$failed_count failed"; \
 	if [ $$failed_count -gt 0 ]; then exit 1; fi
-	@echo "› Running brew bundle"
-	@if command -v brew >/dev/null 2>&1; then \
-		brew bundle || { echo "ERROR: Brew bundle failed"; exit 1; }; \
-	else \
-		echo "WARNING: Homebrew not installed, skipping brew bundle"; \
-	fi
 	@echo "› Installation completed successfully"
 
 clean:

@@ -93,3 +93,13 @@ export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 
 # Created by `pipx` on 2024-10-28 20:02:35
 export PATH="$PATH:/Users/alongat/.local/bin"
+source "/Users/alongat/Code/torqio/app/local_env/app_dotfile.sh"
+
+# pnpm
+export PNPM_HOME="/Users/alongat/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end
+export GOPRIVATE=github.com/stackpulse,stackpulse.dev,github.com/torqio
