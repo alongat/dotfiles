@@ -12,6 +12,7 @@ brew 'bottom'           # Modern system monitor (alternative to htop)
 brew 'curl'             # Command line HTTP client
 brew 'wget'             # File downloader
 brew 'tmux'             # Terminal multiplexer for session management
+brew 'zellij'            # Modern terminal multiplexer with built-in session management
 brew 'vim'              # Text editor (fallback when neovim unavailable)
 brew 'unzip'            # Archive extraction utility
 brew 'watch'            # Execute commands repeatedly and display output
@@ -21,6 +22,7 @@ brew 'mas'              # Mac App Store command line interface
 brew 'bat'              # Cat clone with syntax highlighting and git integration
 brew 'fd'               # Fast and user-friendly alternative to find
 brew 'fzf'              # Fuzzy finder for command line
+brew 'carapace'         # Universal shell completion generator
 brew 'ripgrep'          # Fast text search tool (better than grep)
 brew 'tree'             # Display directory structure as tree
 brew 'eza'              # Modern replacement for ls with colors and icons
