@@ -2,9 +2,7 @@ local wezterm = require("wezterm")
 
 local config = wezterm.config_builder()
 
--- config.font = wezterm.font("FiraCode Nerd Font Mono")
--- config.font = wezterm.font("Monaspace Argon")
-config.font = wezterm.font("Monaspace Neon Var")
+config.font = wezterm.font("FiraCode Nerd Font Mono")
 config.font_size = 18
 
 config.color_scheme = "Tokyo Night"
