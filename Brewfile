@@ -40,6 +40,7 @@ brew 'tig'              # Text-mode interface for git
 brew 'git-delta'        # Better git diff viewer with syntax highlighting
 brew 'lazygit'          # Simple terminal UI for git commands
 brew 'neovim'           # Modern vim-based text editor
+brew 'tree-sitter'      # Parser generator tool and incremental parsing library
 brew 'sst/tap/opencode' # AI coding assistant
 
 # Languages & Runtimes
