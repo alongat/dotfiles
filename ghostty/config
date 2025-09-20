@@ -1,13 +1,13 @@
 # Font configuration
 font-family = FiraCode Nerd Font Mono
-font-size = 18
+font-size = 16
 
 # Theme
 theme = TokyoNight
 
 # Window appearance
 window-decoration = false
-background-opacity = 0.97
+background-opacity = 0.99
 
 # Keybindings
 keybind = alt+right=text:\x1bf
@@ -19,3 +19,4 @@ keybind = cmd+shift+k=scroll_to_bottom
 shell-integration = detect
 mouse-scroll-multiplier = 1
 cursor-style = block
+keybind = shift+enter=text:\x1b\r
