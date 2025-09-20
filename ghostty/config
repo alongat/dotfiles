@@ -1,0 +1,21 @@
+# Font configuration
+font-family = FiraCode Nerd Font Mono
+font-size = 18
+
+# Theme
+theme = TokyoNight
+
+# Window appearance
+window-decoration = false
+background-opacity = 0.97
+
+# Keybindings
+keybind = alt+right=text:\x1bf
+keybind = alt+left=text:\x1bb
+keybind = cmd+k=clear_screen
+keybind = cmd+shift+k=scroll_to_bottom
+
+# Additional Ghostty-specific enhancements
+shell-integration = detect
+mouse-scroll-multiplier = 1
+cursor-style = block
