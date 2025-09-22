@@ -18,6 +18,9 @@ disabled = true
 [buf]
 disabled = true
 
+[ruby]
+disabled = true
+
 [line_break]
 disabled = true
 

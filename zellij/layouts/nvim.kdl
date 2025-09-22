@@ -1,0 +1,24 @@
+layout {
+    pane size=2 borderless=true {
+        plugin location="zellij:tab-bar"
+    }
+    pane split_direction="vertical" {
+        pane size="67%" name="nvim" {
+            command "nvim"
+            args "."
+            cwd "."
+        }
+        pane size="33%" split_direction="horizontal" {
+            pane size="55%" name="claude" {
+                command "claude"
+                cwd "."
+            }
+            pane size="45%" {
+                cwd "."
+            }
+        }
+    }
+    pane size=2 borderless=true {
+        plugin location="zellij:status-bar"
+    }
+}
