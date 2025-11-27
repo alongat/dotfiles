@@ -112,6 +112,7 @@ cask 'visual-studio-code' # Code editor
 cask 'wezterm'            # GPU-accelerated cross-platform terminal emulator
 cask 'whatsapp'           # Messaging app
 cask 'zoom'               # Video conferencing
+cask 'claude-code'
 
 # Fonts
 cask 'font-monaspace'
