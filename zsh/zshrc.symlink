@@ -1,7 +1,5 @@
 # zmodload zsh/zprof
 
-# Q pre block. Keep at the top of this file.
-[[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh"
 DOTFILES=$HOME/.dotfiles
 
 # Support ARM64 and AMD64 macOS.
@@ -18,12 +16,10 @@ fi
 # plugins=(git)
 # source $ZSH/oh-my-zsh.sh
 
-# PATH
+# PATH - consolidated for performance
 export PATH="$BREW_PATH/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-export PATH="{$HOME}/.fig/bin:$PATH"
-
-eval "$(rbenv init - zsh)"
+# rbenv is lazy-loaded via ruby/rbenv.zsh
 eval "$(starship init zsh)"
 
 # Special dirs
@@ -50,30 +46,34 @@ do
   source $file
 done
 
-# initialize autocomplete here, otherwise functions won't be loaded
-autoload -Uz compinit
-if [ -f ~/.zcompdump ]; then
-  zcompdump_modification_time=$(stat -f "%m" ~/.zcompdump)
-  current_time=$(date +%s)
-  if (( current_time - zcompdump_modification_time > 86400 )); then
-    compinit
+# Defer compinit to after prompt appears for faster startup
+_deferred_compinit() {
+  autoload -Uz compinit
+  if [ -f ~/.zcompdump ]; then
+    zcompdump_modification_time=$(stat -f "%m" ~/.zcompdump)
+    current_time=$(date +%s)
+    if (( current_time - zcompdump_modification_time > 86400 )); then
+      compinit
+    else
+      compinit -C
+    fi
   else
-    compinit -C
+    compinit
   fi
-else
-  compinit
-fi
+  
+  # load every completion after autocomplete loads
+  for file in ${(M)config_files:#*/completion.zsh}
+  do
+    source $file
+  done
+  
+  unset config_files
+}
 
-# load every completion after autocomplete loads
-for file in ${(M)config_files:#*/completion.zsh}
-do
-  source $file
-done
-
-unset config_files
-
-
-test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell_integration.zsh"
+# Run compinit in background after prompt appears
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd _deferred_compinit
+add-zsh-hook -d precmd _deferred_compinit  # Remove hook after first run
 
 export PATH="/opt/homebrew/bin:$PATH"
 
@@ -85,9 +85,6 @@ export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 # [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
-
-# Q post block. Keep at the bottom of this file.
-[[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
 
 # zprof
 
@@ -107,8 +104,13 @@ export GOPRIVATE=github.com/stackpulse,stackpulse.dev,github.com/torqio
 # The next line updates PATH for the Google Cloud SDK.
 if [ -f '/opt/homebrew/share/google-cloud-sdk/path.zsh.inc' ]; then . '/opt/homebrew/share/google-cloud-sdk/path.zsh.inc'; fi
 
-# The next line enables shell command completion for gcloud.
-if [ -f '/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc' ]; then . '/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc'; fi
+# gcloud completion is lazy-loaded via gcloud/completion.zsh for performance
 
-# Carapace autocompletion
-source <(carapace _carapace)
+# Lazy-load carapace completion for faster shell startup
+if command -v carapace &> /dev/null; then
+  carapace() {
+    unfunction carapace
+    source <(command carapace _carapace)
+    carapace "$@"
+  }
+fi

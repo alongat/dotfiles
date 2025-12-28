@@ -1,4 +1,8 @@
-if which argocd > /dev/null 2>&1
-then
-	source <(kubectl argo rollouts completion zsh)
+# Lazy-load argocd completion for faster shell startup
+if command -v argocd &> /dev/null; then
+  argocd() {
+    unfunction argocd
+    source <(command kubectl argo rollouts completion zsh)
+    argocd "$@"
+  }
 fi
