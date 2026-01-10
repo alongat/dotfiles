@@ -1,6 +1,6 @@
 # Dotfiles
 
-My private dotfiles collection, forked from @vic3lord 💪.
+Personal dotfiles collection, forked from @vic3lord.
 
 ## Quick Start
 
@@ -21,17 +21,42 @@ cd ~/.dotfiles && make
 
 ## What's Included
 
-This dotfiles collection includes configurations for:
+### Shell & Terminal
+- **zsh** - Shell with custom aliases, completions, history, and fpath configuration
+- **starship** - Cross-shell prompt
+- **ghostty** / **wezterm** - Terminal emulators
+- **zellij** - Terminal multiplexer with custom layouts
+- **fzf** - Fuzzy finder
+- **zoxide** - Smart directory navigation
+- **bat** - Syntax-highlighted cat replacement
+- **carapace** - Universal shell completions
 
-- **Shell**: Zsh with custom aliases, completions, and history
-- **Editor**: Neovim with LazyVim configuration
-- **Terminal**: Wezterm and Starship prompt
-- **macOS**: System defaults and preferences
-- **Package Management**: Homebrew with Brewfile
+### Editor
+- **nvim** - Neovim with LazyVim configuration
+
+### DevOps & Infrastructure
+- **kubernetes** - kubectl aliases and completions
+- **argocd** / **flux** - GitOps tools
+- **linkerd** - Service mesh
+- **terraform** - IaC completions
+- **gcloud** - Google Cloud SDK
+- **go** - Go language configuration
+
+### AI Coding Assistants
+- **claude** - Claude Code configuration
+- **opencode** - OpenCode configuration (with encrypted AGENTS.md)
+- **gemini-cli** - Gemini CLI setup
+
+### Other
+- **git** - Git configuration and aliases
+- **ssh** - SSH client configuration
+- **macos** - macOS system defaults
+- **raycast** - Productivity launcher commands
+- **ruby** - rbenv configuration
 
 ## Structure
 
-- `.symlink` files are automatically linked to home directory
+- `.symlink` files are automatically linked to home directory (e.g., `gitconfig.symlink` → `~/.gitconfig`)
 - `install.sh` scripts handle tool-specific installation
 - `.zsh` files provide shell configuration (aliases, completions, paths)
 - Each tool has its own directory for organized configuration
