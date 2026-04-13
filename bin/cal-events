@@ -1,0 +1,269 @@
+#!/usr/bin/env swift
+
+import EventKit
+import Foundation
+
+// MARK: - Argument Parsing
+
+struct Args {
+    var days: Int = 1          // number of days to show (default: today only)
+    var startDate: Date?       // explicit start date
+    var endDate: Date?         // explicit end date
+    var calendars: [String] = [] // filter by calendar name(s)
+    var excludeAllDay: Bool = false
+    var format: OutputFormat = .table
+    var groupByDay: Bool = false
+
+    enum OutputFormat: String {
+        case table    // human-readable table
+        case tsv      // tab-separated (for scripting)
+        case markdown // markdown table (for obsidian)
+    }
+}
+
+func printUsage() {
+    let usage = """
+    Usage: cal-events [options]
+
+    Options:
+      --days N             Show events for N days starting today (default: 1)
+      --from YYYY-MM-DD    Start date (inclusive)
+      --to YYYY-MM-DD      End date (inclusive)
+      --calendar NAME      Filter to calendar (repeatable). Substring match.
+      --exclude-allday     Exclude all-day events
+      --format FORMAT      Output format: table (default), tsv, markdown
+      --group-by-day       Group events by day with day headers
+
+    Examples:
+      cal-events                              # today's events
+      cal-events --days 5                     # Sun-Thu (work week)
+      cal-events --days 5 --group-by-day      # work week grouped by day
+      cal-events --calendar torq.io           # only work calendar
+      cal-events --from 2026-03-29 --to 2026-04-03 --format markdown
+      cal-events --format tsv                 # for piping/scripting
+    """
+    FileHandle.standardError.write(usage.data(using: .utf8)!)
+}
+
+func parseDate(_ s: String) -> Date? {
+    let df = DateFormatter()
+    df.dateFormat = "yyyy-MM-dd"
+    df.locale = Locale(identifier: "en_US_POSIX")
+    return df.date(from: s)
+}
+
+func parseArgs() -> Args? {
+    var args = Args()
+    var i = 1
+    let argv = CommandLine.arguments
+
+    while i < argv.count {
+        switch argv[i] {
+        case "--days":
+            i += 1
+            guard i < argv.count, let n = Int(argv[i]) else {
+                FileHandle.standardError.write("Error: --days requires an integer\n".data(using: .utf8)!)
+                return nil
+            }
+            args.days = n
+        case "--from":
+            i += 1
+            guard i < argv.count, let d = parseDate(argv[i]) else {
+                FileHandle.standardError.write("Error: --from requires YYYY-MM-DD\n".data(using: .utf8)!)
+                return nil
+            }
+            args.startDate = d
+        case "--to":
+            i += 1
+            guard i < argv.count, let d = parseDate(argv[i]) else {
+                FileHandle.standardError.write("Error: --to requires YYYY-MM-DD\n".data(using: .utf8)!)
+                return nil
+            }
+            args.endDate = d
+        case "--calendar":
+            i += 1
+            guard i < argv.count else {
+                FileHandle.standardError.write("Error: --calendar requires a name\n".data(using: .utf8)!)
+                return nil
+            }
+            args.calendars.append(argv[i])
+        case "--exclude-allday":
+            args.excludeAllDay = true
+        case "--format":
+            i += 1
+            guard i < argv.count, let f = Args.OutputFormat(rawValue: argv[i]) else {
+                FileHandle.standardError.write("Error: --format must be table, tsv, or markdown\n".data(using: .utf8)!)
+                return nil
+            }
+            args.format = f
+        case "--group-by-day":
+            args.groupByDay = true
+        case "--help", "-h":
+            printUsage()
+            exit(0)
+        default:
+            FileHandle.standardError.write("Unknown option: \(argv[i])\n".data(using: .utf8)!)
+            printUsage()
+            return nil
+        }
+        i += 1
+    }
+    return args
+}
+
+// MARK: - Calendar Access
+
+func fetchEvents(args: Args) -> Int32 {
+    let store = EKEventStore()
+    let semaphore = DispatchSemaphore(value: 0)
+    var exitCode: Int32 = 0
+
+    store.requestFullAccessToEvents { granted, error in
+        defer { semaphore.signal() }
+
+        guard granted else {
+            FileHandle.standardError.write("Calendar access denied. Grant access in System Settings > Privacy > Calendars.\n".data(using: .utf8)!)
+            if let e = error {
+                FileHandle.standardError.write("Error: \(e.localizedDescription)\n".data(using: .utf8)!)
+            }
+            exitCode = 1
+            return
+        }
+
+        let cal = Calendar.current
+
+        // Determine date range
+        let start: Date
+        let end: Date
+
+        if let s = args.startDate, let e = args.endDate {
+            start = cal.startOfDay(for: s)
+            end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: e))!
+        } else if let s = args.startDate {
+            start = cal.startOfDay(for: s)
+            end = cal.date(byAdding: .day, value: args.days, to: start)!
+        } else if let e = args.endDate {
+            start = cal.startOfDay(for: Date())
+            end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: e))!
+        } else {
+            start = cal.startOfDay(for: Date())
+            end = cal.date(byAdding: .day, value: args.days, to: start)!
+        }
+
+        // Build predicate
+        var ekCalendars: [EKCalendar]? = nil
+        if !args.calendars.isEmpty {
+            let allCals = store.calendars(for: .event)
+            ekCalendars = allCals.filter { ekCal in
+                args.calendars.contains { filter in
+                    ekCal.title.lowercased().contains(filter.lowercased())
+                }
+            }
+            if ekCalendars?.isEmpty == true {
+                FileHandle.standardError.write("No calendars matched: \(args.calendars.joined(separator: ", "))\n".data(using: .utf8)!)
+                FileHandle.standardError.write("Available: \(allCals.map(\.title).joined(separator: ", "))\n".data(using: .utf8)!)
+                exitCode = 1
+                return
+            }
+        }
+
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: ekCalendars)
+        var events = store.events(matching: predicate)
+
+        // Filter all-day if requested
+        if args.excludeAllDay {
+            events = events.filter { !$0.isAllDay }
+        }
+
+        // Sort by start date
+        events.sort { $0.startDate < $1.startDate }
+
+        // Format and output
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "EEEE, MMM d"
+
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+
+        if events.isEmpty {
+            print("No events found.")
+            return
+        }
+
+        if args.groupByDay {
+            var currentDay = ""
+            for event in events {
+                let dayStr = dayFmt.string(from: event.startDate)
+                if dayStr != currentDay {
+                    currentDay = dayStr
+                    switch args.format {
+                    case .table:
+                        if currentDay != dayFmt.string(from: events.first!.startDate) {
+                            print("")
+                        }
+                        print("=== \(dayStr) ===")
+                    case .markdown:
+                        print("")
+                        print("#### \(dayStr)")
+                        print("| Time | Event | Calendar |")
+                        print("|------|-------|----------|")
+                    case .tsv:
+                        // day marker in tsv
+                        print("DAY\t\(dateFmt.string(from: event.startDate))\t\(dayStr)")
+                    }
+                }
+                printEvent(event, format: args.format, timeFmt: timeFmt, dateFmt: dateFmt)
+            }
+        } else {
+            if args.format == .markdown {
+                print("| Time | Event | Calendar |")
+                print("|------|-------|----------|")
+            }
+            for event in events {
+                printEvent(event, format: args.format, timeFmt: timeFmt, dateFmt: dateFmt)
+            }
+        }
+    }
+
+    semaphore.wait()
+    return exitCode
+}
+
+func printEvent(_ event: EKEvent, format: Args.OutputFormat, timeFmt: DateFormatter, dateFmt: DateFormatter) {
+    let start = timeFmt.string(from: event.startDate)
+    let end = timeFmt.string(from: event.endDate)
+    let title = event.title ?? "untitled"
+    let calName = event.calendar.title
+    let allDay = event.isAllDay
+
+    let timeStr: String
+    if allDay {
+        timeStr = "all-day"
+    } else {
+        timeStr = "\(start)-\(end)"
+    }
+
+    switch format {
+    case .table:
+        print("  \(timeStr.padding(toLength: 12, withPad: " ", startingAt: 0)) \(title)  [\(calName)]")
+    case .tsv:
+        let date = dateFmt.string(from: event.startDate)
+        let location = event.location ?? ""
+        let isAllDay = allDay ? "true" : "false"
+        // TSV: date, start, end, all_day, title, calendar, location
+        print("\(date)\t\(start)\t\(end)\t\(isAllDay)\t\(title)\t\(calName)\t\(location)")
+    case .markdown:
+        print("| \(timeStr) | \(title) | \(calName) |")
+    }
+}
+
+// MARK: - Main
+
+guard let args = parseArgs() else {
+    exit(1)
+}
+
+exit(fetchEvents(args: args))

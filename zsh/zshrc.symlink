@@ -79,11 +79,6 @@ export PATH="/opt/homebrew/bin:$PATH"
 
 export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 
-# Disable this as it's slow and I dont use node, TODO: switch to https://github.com/Schniz/fnm
-# export NVM_DIR="$HOME/.nvm"
-# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
 export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 
 # zprof
@@ -91,14 +86,6 @@ export PATH="$PATH:/opt/homebrew/bin/python3.9/bin"
 # Created by `pipx` on 2024-10-28 20:02:35
 export PATH="$PATH:/Users/alongat/.local/bin"
 source "/Users/alongat/Code/torqio/app/local_env/app_dotfile.sh"
-
-# pnpm
-export PNPM_HOME="/Users/alongat/Library/pnpm"
-case ":$PATH:" in
-  *":$PNPM_HOME:"*) ;;
-  *) export PATH="$PNPM_HOME:$PATH" ;;
-esac
-# pnpm end
 export GOPRIVATE=github.com/stackpulse,stackpulse.dev,github.com/torqio
 
 # The next line updates PATH for the Google Cloud SDK.
@@ -114,3 +101,6 @@ if command -v carapace &> /dev/null; then
     carapace "$@"
   }
 fi
+
+# Torq observability plugin root (used by ai-dev-tools skills)
+export CLAUDE_PLUGIN_ROOT="/Users/alongat/Code/torqio/ai-dev-tools/claude/plugins/torq-observability"

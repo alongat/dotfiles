@@ -8,5 +8,32 @@
     "todoread": "allow",
     "todowrite": "allow",
     "lsp": "allow"
+  },
+  "mcp": {
+    "google-drive-and-email": {
+      "type": "remote",
+      "url": "https://mcp.mcptotal.io/mcp-rf48x9u5hlcp6jtumw9r/mcp",
+      "enabled": true,
+    },
+    "atlassian": {
+      "type": "local",
+      "command": [
+        "/opt/homebrew/bin/npx",
+        "-y",
+        "mcp-remote",
+        "https://mcp.atlassian.com/v1/sse"
+      ],
+      "enabled": true,
+    },
+    "slack": {
+      "type": "remote",
+      "url": "https://mcp.mcptotal.io/mcp-jkgqbej2hxjy1ozyatom/mcp",
+      "enabled": true,
+    },
+    "notion-total": {
+      "type": "remote",
+      "url": "https://mcp.mcptotal.io/mcp-isorqlcgoesnehyipyns/mcp",
+      "oauth": {}
+    },
   }
 }

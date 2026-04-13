@@ -12,7 +12,7 @@ brew 'bottom'           # Modern system monitor (alternative to htop)
 brew 'curl'             # Command line HTTP client
 brew 'wget'             # File downloader
 brew 'tmux'             # Terminal multiplexer for session management
-brew 'zellij'            # Modern terminal multiplexer with built-in session management
+brew 'zellij'           # Modern terminal multiplexer with built-in session management
 brew 'vim'              # Text editor (fallback when neovim unavailable)
 brew 'unzip'            # Archive extraction utility
 brew 'watch'            # Execute commands repeatedly and display output
@@ -86,7 +86,7 @@ brew 'httpie'           # User-friendly HTTP client (better than curl for APIs)
 brew 'yq'               # YAML processor (like jq but for YAML)
 
 # Project Management
-brew 'jira-cli'         # Command line interface for Jira
+brew 'jira-cli' # Command line interface for Jira
 
 # Casks
 # Applications
@@ -101,18 +101,17 @@ cask 'hiddenbar'          # Hide menu bar icons
 cask 'iina'               # Video player
 cask 'kap'                # Screen recorder
 cask 'notion'             # Workspace for notes, tasks, wikis
-cask 'openlens'           # Kubernetes IDE
 cask 'osquery'            # SQL powered operating system analytics
 cask 'raycast'            # Productivity launcher
-cask 'signal'             # Encrypted messaging app
 cask 'slack'              # Team communication
 cask 'spotify'            # Music streaming
 cask 'tableplus'          # Database client
-cask 'visual-studio-code' # Code editor
 cask 'wezterm'            # GPU-accelerated cross-platform terminal emulator
 cask 'whatsapp'           # Messaging app
 cask 'zoom'               # Video conferencing
 cask 'claude-code'
+cask 'alcove'
+cask 'dockdoor'
 
 # Fonts
 cask 'font-monaspace'
@@ -120,5 +119,4 @@ cask 'font-fira-code'
 cask 'font-fira-code-nerd-font'
 
 # App Store
-mas "Copy'em", id: 876540291
-mas "Tailscale", id: 1475387142
+mas 'Tailscale', id: 1_475_387_142
