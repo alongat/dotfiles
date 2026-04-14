@@ -48,6 +48,9 @@ done
 
 # Defer compinit to after prompt appears for faster startup
 _deferred_compinit() {
+  # Self-remove so this only runs once
+  add-zsh-hook -d precmd _deferred_compinit
+
   autoload -Uz compinit
   if [ -f ~/.zcompdump ]; then
     zcompdump_modification_time=$(stat -f "%m" ~/.zcompdump)
@@ -70,10 +73,9 @@ _deferred_compinit() {
   unset config_files
 }
 
-# Run compinit in background after prompt appears
+# Run compinit after first prompt appears
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd _deferred_compinit
-add-zsh-hook -d precmd _deferred_compinit  # Remove hook after first run
 
 export PATH="/opt/homebrew/bin:$PATH"
 
