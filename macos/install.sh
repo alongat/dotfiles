@@ -31,22 +31,15 @@ else
     echo "  ⚠️ defaults.sh not found, skipping"
 fi
 
-# Setup sudo_local for Touch ID
-sudo_template="$(dirname "$0")/sudo_local.template"
-if [ -f "$sudo_template" ]; then
-    if [ ! -f /etc/pam.d/sudo_local ]; then
-        echo "  Setting up Touch ID for sudo..."
-        if sudo cp "$sudo_template" /etc/pam.d/sudo_local; then
-            echo "  ✅ Touch ID for sudo configured successfully"
-        else
-            echo "  ❌ Failed to configure Touch ID for sudo"
-            exit 1
-        fi
+# Setup Dock
+dock_script="$(dirname "$0")/dock.sh"
+if [ -f "$dock_script" ]; then
+    echo "  Running Dock configuration..."
+    if "$dock_script"; then
+        echo "  ✅ Dock configured successfully"
     else
-        echo "  Touch ID for sudo already configured"
+        echo "  ⚠️ Dock configuration failed (non-fatal)"
     fi
-else
-    echo "  ⚠️ sudo_local.template not found, skipping Touch ID setup"
 fi
 
 echo "  ✅ macOS configuration completed"

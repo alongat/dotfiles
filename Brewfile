@@ -3,6 +3,7 @@ tap 'hashicorp/tap'
 tap 'bufbuild/buf'
 tap 'ankitpokhrel/jira-cli'
 tap 'sst/tap'
+tap 'argoproj/tap'
 
 # System Utilities
 brew 'coreutils'        # GNU core utilities (better versions of basic commands)
@@ -17,6 +18,7 @@ brew 'vim'              # Text editor (fallback when neovim unavailable)
 brew 'unzip'            # Archive extraction utility
 brew 'watch'            # Execute commands repeatedly and display output
 brew 'mas'              # Mac App Store command line interface
+brew 'dockutil'         # CLI tool for managing macOS Dock items
 
 # File & Text Tools
 brew 'bat'              # Cat clone with syntax highlighting and git integration
@@ -42,6 +44,7 @@ brew 'lazygit'          # Simple terminal UI for git commands
 brew 'neovim'           # Modern vim-based text editor
 brew 'tree-sitter'      # Parser generator tool and incremental parsing library
 brew 'sst/tap/opencode' # AI coding assistant
+brew 'starship'
 
 # Languages & Runtimes
 brew 'go'               # Go programming language
@@ -54,9 +57,9 @@ brew 'rbenv'            # Ruby version manager
 brew 'kubectl'          # Kubernetes command line tool
 brew 'k3d'              # Lightweight Kubernetes in Docker
 brew 'minikube'         # Local Kubernetes development environment
-brew 'kubectl-argo-rollouts' # Kubectl plugin for Argo Rollouts
+brew 'argoproj/tap/kubectl-argo-rollouts' # Kubectl plugin for Argo Rollouts
 brew 'argocd'           # GitOps continuous delivery tool
-brew 'terraform'        # Infrastructure as code tool
+brew 'hashicorp/tap/terraform' # Infrastructure as code tool
 brew 'terraform-ls'     # Terraform language server
 brew 'mkcert'           # Create locally-trusted development certificates
 brew 'ko'               # Build and deploy Go applications on Kubernetes
@@ -108,10 +111,11 @@ cask 'spotify'            # Music streaming
 cask 'tableplus'          # Database client
 cask 'wezterm'            # GPU-accelerated cross-platform terminal emulator
 cask 'whatsapp'           # Messaging app
-cask 'zoom'               # Video conferencing
 cask 'claude-code'
 cask 'alcove'
 cask 'dockdoor'
+cask 'obsidian'
+cask 'sublime-text'
 
 # Fonts
 cask 'font-monaspace'

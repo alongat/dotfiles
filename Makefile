@@ -1,8 +1,8 @@
 DOTFILES = $(shell find -H $(CURDIR) -maxdepth 2 -name '*.symlink' -not -path "*.git*")
 BACKUP_DIR = $(HOME)/.dotfiles-backup/$(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: all dotfiles install backup clean test help
-all: dotfiles install
+.PHONY: all dotfiles install install-private touchid backup clean test help
+all: dotfiles touchid install install-private
 
 help:
 	@echo "Available targets:"
@@ -30,6 +30,15 @@ dotfiles: backup
 		echo "  Linking $(src) -> $(HOME)/.$(shell basename $(subst .symlink,,$(src)))"; \
 		ln -sfn $(src) $(HOME)/.$(shell basename $(subst .symlink,,$(src))) || { echo "ERROR: Failed to link $(src)"; exit 1; };)
 	@echo "› Dotfiles installation completed"
+
+touchid:
+	@if [ ! -f /etc/pam.d/sudo_local ]; then \
+		echo "› Enabling Touch ID for sudo..."; \
+		sudo cp macos/sudo_local.template /etc/pam.d/sudo_local; \
+		echo "  ✅ Touch ID for sudo enabled"; \
+	else \
+		echo "  ✅ Touch ID for sudo already configured"; \
+	fi
 
 install:
 	@echo "› Installing Homebrew"
@@ -64,6 +73,16 @@ install:
 	echo "› Install scripts completed: $$install_count succeeded, $$failed_count failed"; \
 	if [ $$failed_count -gt 0 ]; then exit 1; fi
 	@echo "› Installation completed successfully"
+
+install-private:
+	@if [ -f torq/Brewfile.torq ]; then \
+		echo "› Installing private (Torq) packages..."; \
+		brew bundle --file=torq/Brewfile.torq; \
+	fi
+	@if [ -f torq/install.sh ]; then \
+		echo "› Running private install script..."; \
+		sh torq/install.sh; \
+	fi
 
 clean:
 	@echo "› Cleaning broken symlinks"
