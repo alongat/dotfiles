@@ -2,7 +2,7 @@
 if command -v argocd &> /dev/null; then
   argocd() {
     unfunction argocd
-    source <(command kubectl argo rollouts completion zsh)
+    source <(command argocd completion zsh)
     argocd "$@"
   }
 fi
