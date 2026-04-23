@@ -100,3 +100,6 @@ if command -v carapace &> /dev/null; then
     carapace "$@"
   }
 fi
+
+# Torq AI dev tools plugin root (used by skill scripts)
+export CLAUDE_PLUGIN_ROOT="/Users/alongat/Code/torqio/ai-dev-tools/claude/plugins/torq-observability"
