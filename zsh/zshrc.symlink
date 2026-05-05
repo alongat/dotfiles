@@ -103,3 +103,4 @@ fi
 
 # Torq AI dev tools plugin root (used by skill scripts)
 export CLAUDE_PLUGIN_ROOT="/Users/alongat/Code/torqio/ai-dev-tools/claude/plugins/torq-observability"
+source "/Users/alongat/Code/torqio/app/local_env/app_dotfile.sh"

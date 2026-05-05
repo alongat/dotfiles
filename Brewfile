@@ -101,15 +101,12 @@ cask 'ghostty'            # Terminal emulator
 cask 'google-cloud-sdk'   # Google Cloud CLI
 cask 'google-drive'       # Cloud storage
 cask 'hiddenbar'          # Hide menu bar icons
-cask 'iina'               # Video player
 cask 'kap'                # Screen recorder
 cask 'notion'             # Workspace for notes, tasks, wikis
 cask 'osquery'            # SQL powered operating system analytics
 cask 'raycast'            # Productivity launcher
 cask 'slack'              # Team communication
 cask 'spotify'            # Music streaming
-cask 'tableplus'          # Database client
-cask 'wezterm'            # GPU-accelerated cross-platform terminal emulator
 cask 'whatsapp'           # Messaging app
 cask 'claude-code'
 cask 'alcove'
