@@ -1,0 +1,17 @@
+# Ollama local models manifest
+# One model per line (ollama model:tag format)
+# Comments and blank lines are ignored
+# Run 'ollama-sync' to pull new models and remove unlisted ones
+
+# Gemma 4 — Google DeepMind
+gemma4:e4b          # 9.6GB, 128K ctx — fast local daily driver
+gemma4:26b          # 18GB, 256K ctx — MoE quality model (3.8B active params)
+
+# Qwen 3.6 — Alibaba (best local coding agent, SWE-bench 73.4%)
+qwen3.6:35b         # 24GB, 256K ctx — primary coding agent, tools + thinking, MoE (3B active)
+
+# Devstral Small 2 — Mistral + All Hands AI (largest context of any local model)
+devstral-small-2:24b  # 15GB, 384K ctx — fast coder, full repo analysis, tools + vision
+
+# DeepSeek R1 — DeepSeek (strongest local reasoning model)
+deepseek-r1:32b     # 20GB, 128K ctx — deep reasoning, always-on chain-of-thought, hard bugs

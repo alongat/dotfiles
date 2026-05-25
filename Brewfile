@@ -44,6 +44,8 @@ brew 'lazygit'          # Simple terminal UI for git commands
 brew 'neovim'           # Modern vim-based text editor
 brew 'tree-sitter'      # Parser generator tool and incremental parsing library
 brew 'anomalyco/tap/opencode' # AI coding assistant
+brew 'ollama'               # Local LLM runtime
+brew 'uv'                   # Fast Python package/project manager (used for graphify, etc.)
 brew 'starship'
 
 # Languages & Runtimes
