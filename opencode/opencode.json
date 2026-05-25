@@ -10,23 +10,38 @@
       "models": {
         "gemma4:e4b": {
           "name": "Gemma 4 E4B (fast local)",
-          "limit": { "context": 128000, "output": 32768 }
+          "limit": {
+            "context": 128000,
+            "output": 32768
+          }
         },
         "gemma4:26b": {
           "name": "Gemma 4 26B MoE (quality local)",
-          "limit": { "context": 128000, "output": 32768 }
+          "limit": {
+            "context": 128000,
+            "output": 32768
+          }
         },
         "qwen3.6:35b": {
           "name": "Qwen 3.6 35B (primary coder)",
-          "limit": { "context": 256000, "output": 32768 }
+          "limit": {
+            "context": 256000,
+            "output": 32768
+          }
         },
         "devstral-small-2:24b": {
           "name": "Devstral Small 2 24B (384K ctx)",
-          "limit": { "context": 384000, "output": 32768 }
+          "limit": {
+            "context": 384000,
+            "output": 32768
+          }
         },
         "deepseek-r1:32b": {
           "name": "DeepSeek R1 32B (deep reasoning)",
-          "limit": { "context": 128000, "output": 32768 }
+          "limit": {
+            "context": 128000,
+            "output": 32768
+          }
         }
       }
     }
@@ -39,7 +54,6 @@
     "todoread": "allow",
     "todowrite": "allow",
     "lsp": "allow",
-
     "incident_io_*": "ask",
     "incident_io_alert_list": "allow",
     "incident_io_alert_show": "allow",
@@ -71,7 +85,6 @@
     "incident_io_schedule_show": "allow",
     "incident_io_team_list": "allow",
     "incident_io_team_show": "allow",
-
     "atlassian_*": "ask",
     "atlassian_atlassianUserInfo": "allow",
     "atlassian_getAccessibleAtlassianResources": "allow",
@@ -93,14 +106,32 @@
     "atlassian_search": "allow",
     "atlassian_searchConfluenceUsingCql": "allow",
     "atlassian_searchJiraIssuesUsingJql": "allow",
-
     "slack_*": "ask",
     "slack_mcptotal_server_get_mandatory_instructions": "allow",
     "slack_mcptotal_share_resource": "allow",
-
+    "slack_mcptotal_resume_approved_tool_call": "allow",
+    "slack_slack_search_conversations": "allow",
+    "slack_slack_search_messages": "allow",
+    "slack_slack_search_users": "allow",
+    "slack_slack_get_conversation_members": "allow",
+    "slack_slack_get_current_user": "allow",
+    "slack_slack_download_file": "allow",
+    "slack_slack_post_message": "ask",
+    "slack_slack_add_reaction": "ask",
+    "slack_slack_remove_reaction": "ask",
+    "slack_slack_create_channel": "ask",
     "notion_*": "ask",
-
-    "google-drive-and-email_*": "ask"
+    "google-drive-and-email_*": "ask",
+    "external_directory": {
+      "/Users/alongat/Code/**": "allow",
+      "*": "ask"
+    }
+  },
+  "command": {
+    "usage": {
+      "description": "Show monthly Claude API usage stats (cost, tokens, sessions)",
+      "template": "Use the claude_usage tool to show my usage statistics for the past 3 months."
+    }
   },
   "mcp": {
     "incident.io": {
@@ -111,11 +142,6 @@
     "notion": {
       "type": "remote",
       "url": "https://mcp.notion.com/mcp",
-      "oauth": {}
-    },
-    "slack": {
-      "type": "remote",
-      "url": "{env:MCP_SLACK_URL}",
       "oauth": {}
     },
     "jellyfish": {
@@ -152,6 +178,11 @@
     "metabase": {
       "type": "remote",
       "url": "https://metabase.torqio.dev/api/mcp",
+      "oauth": {}
+    },
+    "slack": {
+      "type": "remote",
+      "url": "{env:MCP_SLACK_URL}",
       "oauth": {}
     }
   }
