@@ -5,6 +5,9 @@ import { join } from "path"
 
 const DB_PATH = join(homedir(), ".local/share/opencode/opencode.db")
 
+const TOAST_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
+let lastToastAt = 0
+
 function formatCost(n: number): string {
   return `$${n.toFixed(2)}`
 }
@@ -12,25 +15,33 @@ function formatCost(n: number): string {
 export const UsageToastPlugin: Plugin = async ({ client }) => {
   return {
     event: async ({ event }) => {
-      if (event.type !== "session.created") return
+      // Fire when the agent finishes working, not on session start
+      if (event.type !== "session.idle") return
+
+      // session.idle carries sessionID — skip if missing (safety)
+      const sessionID = (event.properties as { sessionID?: string }).sessionID
+      if (!sessionID) return
+
+      const nowMs = Date.now()
+      if (nowMs - lastToastAt < TOAST_COOLDOWN_MS) return
+      lastToastAt = nowMs
 
       try {
         const db = new Database(DB_PATH, { readonly: true })
         const now = new Date()
 
-        // Start of current month in ms
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
-        // Start of next month in ms
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime()
 
+        // Monthly total from message table — includes all sessions (subagents too)
         const row = db
           .query<{ cost: number; sessions: number }, [number, number]>(
             `SELECT
-              COALESCE(SUM(cost), 0) AS cost,
-              COUNT(*) AS sessions
-            FROM session
-            WHERE time_created >= ? AND time_created < ?
-              AND (parent_id IS NULL OR parent_id = '')`
+              COALESCE(SUM(CAST(json_extract(data, '$.cost') AS REAL)), 0) AS cost,
+              COUNT(DISTINCT session_id) AS sessions
+            FROM message
+            WHERE json_extract(data, '$.role') = 'assistant'
+              AND time_created >= ? AND time_created < ?`
           )
           .get(monthStart, monthEnd)
 
@@ -45,7 +56,7 @@ export const UsageToastPlugin: Plugin = async ({ client }) => {
           body: { message, variant: "info" },
         })
       } catch {
-        // Never break session startup over a usage toast
+        // Never break the session over a usage toast
       }
     },
   }
