@@ -137,12 +137,14 @@
     "incident.io": {
       "type": "remote",
       "url": "https://mcp.incident.io/mcp",
-      "oauth": {}
+      "oauth": {},
+      "enabled": false
     },
     "notion": {
       "type": "remote",
       "url": "https://mcp.notion.com/mcp",
-      "oauth": {}
+      "oauth": {},
+      "enabled": false
     },
     "jellyfish": {
       "type": "local",
@@ -150,7 +152,7 @@
         "node",
         "/Users/alongat/.local/share/jellyfish-mcp/server/index.js"
       ],
-      "enabled": true,
+      "enabled": false,
       "environment": {
         "JELLYFISH_API_TOKEN": "{env:JELLYFISH_API_TOKEN}"
       }
@@ -158,12 +160,13 @@
     "finout": {
       "type": "remote",
       "url": "https://mcp.finout.io/mcp",
-      "oauth": {}
+      "oauth": {},
+      "enabled": false
     },
     "google-drive-and-email": {
       "type": "remote",
       "url": "{env:MCP_GDRIVE_URL}",
-      "enabled": true
+      "enabled": false
     },
     "atlassian": {
       "type": "local",
@@ -173,17 +176,27 @@
         "mcp-remote",
         "https://mcp.atlassian.com/v1/sse"
       ],
-      "enabled": true
+      "enabled": false
     },
     "metabase": {
       "type": "remote",
       "url": "https://metabase.torqio.dev/api/mcp",
-      "oauth": {}
+      "oauth": {},
+      "enabled": false
     },
     "slack": {
       "type": "remote",
       "url": "{env:MCP_SLACK_URL}",
-      "oauth": {}
+      "oauth": {},
+      "enabled": false
+    },
+    "slack-oauth": {
+      "type": "remote",
+      "url": "https://mcp.slack.com/mcp",
+      "oauth": {
+        "clientId": "3660753192626.8903469228982"
+      },
+      "enabled": false
     }
   }
 }
