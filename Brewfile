@@ -4,6 +4,7 @@ tap 'bufbuild/buf'
 tap 'ankitpokhrel/jira-cli'
 tap 'sst/tap'
 tap 'argoproj/tap'
+tap 'jundot/omlx', 'https://github.com/jundot/omlx'
 
 # System Utilities
 brew 'coreutils'        # GNU core utilities (better versions of basic commands)
@@ -45,6 +46,7 @@ brew 'neovim'           # Modern vim-based text editor
 brew 'tree-sitter'      # Parser generator tool and incremental parsing library
 brew 'anomalyco/tap/opencode' # AI coding assistant
 brew 'ollama'               # Local LLM runtime
+brew 'omlx'                 # LLM inference server with continuous batching for Apple Silicon (CLI)
 brew 'uv'                   # Fast Python package/project manager (used for graphify, etc.)
 brew 'starship'
 
