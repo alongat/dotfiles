@@ -225,8 +225,9 @@ if [ -f ~/.config/opencode/plugin ] && [ ! -L ~/.config/opencode/plugin ]; then
     rm ~/.config/opencode/plugin
 fi
 
-# Check for .env secrets file
-if [ ! -f "$HOME/.dotfiles/opencode/.env" ]; then
+# Check for .env secrets file (may be a regular file, symlink, or a named
+# pipe fed by a 1Password-backed process — use -e so any of those count as present)
+if [ ! -e "$HOME/.dotfiles/opencode/.env" ]; then
     echo ""
     echo "  ⚠️  Missing secrets file: ~/.dotfiles/opencode/.env"
     echo "  Copying .env.example as a starting point..."
@@ -296,7 +297,10 @@ if [ -d "$VAULT_SKILLS" ]; then
         name=$(basename "$skill_dir")
         [ "$name" = "output" ] && continue  # skip build artifacts
         target="$SKILLS_DIR/$name"
-        if [ ! -e "$target" ]; then
+        # -e follows symlinks, so a broken symlink (e.g. stale ai-dev-tools
+        # path) looks "missing" and ln -s would fail with "File exists".
+        # Also check -L so any existing link, broken or not, counts as present.
+        if [ ! -e "$target" ] && [ ! -L "$target" ]; then
             ln -s "$skill_dir" "$target"
             echo "  ✅ Linked skill: $name"
         else

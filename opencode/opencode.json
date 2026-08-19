@@ -195,8 +195,12 @@
     "notion_*": "ask",
     "google-drive-and-email_*": "ask",
     "external_directory": {
+      "*": "ask",
       "/Users/alongat/Code/**": "allow",
-      "*": "ask"
+      "/Users/alongat/.agents/**": "allow",
+      "/Users/alongat/.go/**": "allow",
+      "/Users/alongat/.transcribeer/sessions/**": "allow",
+      "/tmp/**": "allow"
     }
   },
   "command": {
@@ -271,8 +275,8 @@
       "enabled": false
     }
   },
-  "model": "omlx/gemma-4-26b-a4b-it-4bit",
   "plugin": [
-    "@plannotator/opencode@latest"
+    "@plannotator/opencode@latest",
+    "@dietrichgebert/ponytail"
   ]
 }

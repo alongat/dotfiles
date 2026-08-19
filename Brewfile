@@ -1,10 +1,10 @@
 # Taps
 tap 'hashicorp/tap'
 tap 'bufbuild/buf'
-tap 'ankitpokhrel/jira-cli'
 tap 'sst/tap'
 tap 'argoproj/tap'
 tap 'jundot/omlx', 'https://github.com/jundot/omlx'
+tap 'atlassian/homebrew-acli'
 
 # System Utilities
 brew 'coreutils'        # GNU core utilities (better versions of basic commands)
@@ -49,6 +49,7 @@ brew 'ollama'               # Local LLM runtime
 brew 'omlx'                 # LLM inference server with continuous batching for Apple Silicon (CLI)
 brew 'uv'                   # Fast Python package/project manager (used for graphify, etc.)
 brew 'starship'
+brew 'herdr'                # Terminal workspace manager / agent multiplexer for AI coding agents
 
 # Languages & Runtimes
 brew 'go'               # Go programming language
@@ -62,7 +63,7 @@ brew 'kubectl'          # Kubernetes command line tool
 brew 'k3d'              # Lightweight Kubernetes in Docker
 brew 'minikube'         # Local Kubernetes development environment
 brew 'argoproj/tap/kubectl-argo-rollouts' # Kubectl plugin for Argo Rollouts
-brew 'argocd'           # GitOps continuous delivery tool
+brew 'argocd' # GitOps continuous delivery tool
 brew 'hashicorp/tap/terraform' # Infrastructure as code tool
 brew 'terraform-ls'     # Terraform language server
 brew 'mkcert'           # Create locally-trusted development certificates
@@ -93,7 +94,7 @@ brew 'httpie'           # User-friendly HTTP client (better than curl for APIs)
 brew 'yq'               # YAML processor (like jq but for YAML)
 
 # Project Management
-brew 'jira-cli' # Command line interface for Jira
+brew 'acli' # Command line interface for Jira
 
 # Casks
 # Applications
@@ -114,7 +115,6 @@ cask 'spotify'            # Music streaming
 cask 'whatsapp'           # Messaging app
 cask 'claude-code'
 cask 'alcove'
-cask 'dockdoor'
 cask 'obsidian'
 cask 'sublime-text'
 
