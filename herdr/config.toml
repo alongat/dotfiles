@@ -1,8 +1,29 @@
+onboarding = false
 [ui]
 show_agent_labels_on_pane_borders = true
 
+status_indicators = "symbols"
+agent_panel_sort = "priority"
 [ui.toast]
 delivery = "terminal"
 
 [keys]
-prefix = "ctrl+s"
+prefix = "ctrl+space"
+
+# Cycle agents / spaces (cmd+tab-style), both via the Caps Lock Hyper key
+# (ctrl+alt+shift+cmd — Raycast). Hyper always fires all 4 mods together, so
+# agent vs. space is picked by key, not by an extra modifier: brackets for
+# agents, comma/period for spaces.
+next_agent = "ctrl+cmd+alt+shift+]"
+previous_agent = "ctrl+cmd+alt+shift+["
+next_workspace = "ctrl+cmd+alt+shift+."
+previous_workspace = "ctrl+cmd+alt+shift+,"
+
+# Jump straight to agent/space N. Unrelated modifier set (no Hyper involved),
+# so no collision with the cycle keys above; cmd/shift only chosen to dodge
+# switch_tab's plain prefix+1..9.
+focus_agent = "prefix+cmd+1..9"
+switch_workspace = "prefix+shift+1..9"
+
+[session]
+resume_agents_on_restore = true

@@ -116,7 +116,7 @@ cask 'whatsapp'           # Messaging app
 cask 'claude-code'
 cask 'alcove'
 cask 'obsidian'
-cask 'sublime-text'
+cask 'zed'
 
 # Fonts
 cask 'font-monaspace'
