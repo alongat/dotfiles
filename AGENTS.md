@@ -24,7 +24,7 @@
 
 - Managed links are declared explicitly in `scripts/link-configs.sh`
 - Existing targets are backed up before links are created
-- `.zsh` files are retained only as migration references and are not loaded
+- Keep this branch Omarchy-specific; remove macOS, Homebrew, and Zsh-only files
 - Never modify `/usr/share/omarchy`; track user overrides under `omarchy/`
 - Use absolute paths in scripts, avoid relative path dependencies
 

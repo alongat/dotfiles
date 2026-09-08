@@ -19,6 +19,6 @@ elif command -v pipx &>/dev/null; then
     pipx install graphifyy
     echo "  ✅ Graphify installed successfully"
 else
-    echo "  ❌ Neither uv nor pipx found. Install uv first (brew install uv)"
+    echo "  ❌ Neither uv nor pipx found. Install uv with: make packages PACKAGE_GROUPS=development"
     exit 1
 fi

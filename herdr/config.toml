@@ -10,8 +10,8 @@ delivery = "terminal"
 [keys]
 prefix = "ctrl+space"
 
-# Cycle agents / spaces (cmd+tab-style), both via the Caps Lock Hyper key
-# (ctrl+alt+shift+cmd — Raycast). Hyper always fires all 4 mods together, so
+# Cycle agents / spaces using the Caps Lock Hyper key. Hyper sends all four
+# modifiers together, so
 # agent vs. space is picked by key, not by an extra modifier: brackets for
 # agents, comma/period for spaces.
 next_agent = "ctrl+cmd+alt+shift+]"

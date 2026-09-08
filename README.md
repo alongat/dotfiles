@@ -99,5 +99,3 @@ first installation:
 
 OpenCode is not linked yet. Its existing configuration contains macOS paths
 and iCloud-dependent vault integration that must be made Linux-safe first.
-The original macOS-only installers remain in the branch for migration
-reference but are not executed by the Omarchy Makefile.
