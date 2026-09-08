@@ -1,0 +1,8 @@
+# Omarchy supplies Bash, fzf, zoxide, Starship, eza, bat, fd, and wl-clipboard.
+github-cli
+git-delta
+zellij
+jq
+go-yq
+tree
+bind

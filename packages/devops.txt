@@ -1,0 +1,5 @@
+kubectl
+helm
+terraform
+httpie
+argocd

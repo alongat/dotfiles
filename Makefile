@@ -1,102 +1,40 @@
-DOTFILES = $(shell find -H $(CURDIR) -maxdepth 2 -name '*.symlink' -not -path "*.git*")
-BACKUP_DIR = $(HOME)/.dotfiles-backup/$(shell date +%Y%m%d-%H%M%S)
+PACKAGE_GROUPS ?= core
 
-.PHONY: all dotfiles install install-private touchid backup clean test help
-all: dotfiles touchid install install-private
+.PHONY: all help install packages packages-all dotfiles test verify clean
+
+all: install
 
 help:
 	@echo "Available targets:"
-	@echo "  all      - Install dotfiles and run all installers"
-	@echo "  dotfiles - Create symlinks for dotfiles"
-	@echo "  install  - Run all install.sh scripts"
-	@echo "  backup   - Backup existing dotfiles"
-	@echo "  clean    - Remove broken symlinks"
-	@echo "  test     - Test installation without making changes"
-	@echo "  help     - Show this help message"
+	@echo "  install      - Install core packages and link managed configuration"
+	@echo "  packages     - Install PACKAGE_GROUPS (default: core)"
+	@echo "  packages-all - Install core, development, and devops groups"
+	@echo "  dotfiles     - Back up conflicts and link managed configuration"
+	@echo "  test         - Preview package and configuration changes"
+	@echo "  verify       - Validate scripts, links, and shell startup"
+	@echo "  clean        - Remove broken managed symlinks"
 
-backup:
-	@echo "› Creating backup directory: $(BACKUP_DIR)"
-	@mkdir -p $(BACKUP_DIR)
-	@$(foreach src,$(DOTFILES), \
-		if [ -f $(HOME)/.$(shell basename $(subst .symlink,,$(src))) ] && [ ! -L $(HOME)/.$(shell basename $(subst .symlink,,$(src))) ]; then \
-			echo "  Backing up ~/.$(shell basename $(subst .symlink,,$(src)))"; \
-			cp $(HOME)/.$(shell basename $(subst .symlink,,$(src))) $(BACKUP_DIR)/; \
-		fi;)
-	@echo "› Backup completed in $(BACKUP_DIR)"
+install: packages dotfiles
+	@echo "› Omarchy dotfiles installation completed"
 
-dotfiles: backup
-	@echo "› Installing dotfiles"
-	@$(foreach src,$(DOTFILES), \
-		echo "  Linking $(src) -> $(HOME)/.$(shell basename $(subst .symlink,,$(src)))"; \
-		ln -sfn $(src) $(HOME)/.$(shell basename $(subst .symlink,,$(src))) || { echo "ERROR: Failed to link $(src)"; exit 1; };)
-	@echo "› Dotfiles installation completed"
+packages:
+	@./scripts/install-packages.sh $(PACKAGE_GROUPS)
 
-touchid:
-	@if [ ! -f /etc/pam.d/sudo_local ]; then \
-		echo "› Enabling Touch ID for sudo..."; \
-		sudo cp macos/sudo_local.template /etc/pam.d/sudo_local; \
-		echo "  ✅ Touch ID for sudo enabled"; \
-	else \
-		echo "  ✅ Touch ID for sudo already configured"; \
-	fi
+packages-all:
+	@./scripts/install-packages.sh core development devops
 
-install:
-	@echo "› Installing Homebrew"
-	@if [ -f ./brew/install.sh ]; then \
-		echo "  Running brew/install.sh"; \
-		sh -c "./brew/install.sh" || { echo "ERROR: Homebrew installation failed"; exit 1; }; \
-	else \
-		echo "WARNING: brew/install.sh not found, skipping Homebrew installation"; \
-	fi
-	@echo "› Running brew bundle"
-	@if command -v brew >/dev/null 2>&1; then \
-		brew bundle || { echo "ERROR: Brew bundle failed"; exit 1; }; \
-	else \
-		echo "ERROR: Homebrew not available for brew bundle"; exit 1; \
-	fi
-	@echo "› Running remaining install scripts"
-	@if [ ! -d ~/.config ]; then \
-		echo "  Creating ~/.config directory"; \
-		mkdir -p ~/.config || { echo "ERROR: Failed to create ~/.config"; exit 1; }; \
-	fi
-	@install_count=0; \
-	failed_count=0; \
-	for script in $$(find . -name install.sh | grep -v './brew/install.sh'); do \
-		echo "  Running $$script"; \
-		if sh -c "$$script"; then \
-			install_count=$$((install_count + 1)); \
-		else \
-			echo "ERROR: $$script failed"; \
-			failed_count=$$((failed_count + 1)); \
-		fi; \
-	done; \
-	echo "› Install scripts completed: $$install_count succeeded, $$failed_count failed"; \
-	if [ $$failed_count -gt 0 ]; then exit 1; fi
-	@echo "› Installation completed successfully"
-
-install-private:
-	@if [ -f torq/Brewfile.torq ]; then \
-		echo "› Installing private (Torq) packages..."; \
-		brew bundle --file=torq/Brewfile.torq; \
-	fi
-	@if [ -f torq/install.sh ]; then \
-		echo "› Running private install script..."; \
-		sh torq/install.sh; \
-	fi
-
-clean:
-	@echo "› Cleaning broken symlinks"
-	@$(foreach src,$(DOTFILES), \
-		if [ -L $(HOME)/.$(shell basename $(subst .symlink,,$(src))) ] && [ ! -e $(HOME)/.$(shell basename $(subst .symlink,,$(src))) ]; then \
-			echo "  Removing broken symlink: ~/.$(shell basename $(subst .symlink,,$(src)))"; \
-			rm $(HOME)/.$(shell basename $(subst .symlink,,$(src))); \
-		fi;)
+dotfiles:
+	@./scripts/link-configs.sh
 
 test:
-	@echo "› Testing dotfiles installation (dry run)"
-	@echo "Files that would be symlinked:"
-	@$(foreach src,$(DOTFILES), \
-		echo "  $(src) -> $(HOME)/.$(shell basename $(subst .symlink,,$(src)))";)
-	@echo "Install scripts that would be executed:"
-	@find . -name install.sh | sort
-	@echo "› Test completed"
+	@./scripts/verify.sh --scripts-only
+	@echo "› Previewing package installation"
+	@./scripts/install-packages.sh --dry-run $(PACKAGE_GROUPS)
+	@echo "› Previewing configuration links"
+	@./scripts/link-configs.sh --dry-run
+
+verify:
+	@./scripts/verify.sh
+
+clean:
+	@./scripts/link-configs.sh --clean

@@ -1,0 +1,15 @@
+# Loaded after Omarchy's Bash defaults from ~/.bashrc.
+[[ $- == *i* ]] || return
+
+DOTFILES_BASH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+export DOTFILES_ROOT=$(cd "$DOTFILES_BASH_DIR/.." && pwd -P)
+
+source "$DOTFILES_BASH_DIR/environment.bash"
+source "$DOTFILES_BASH_DIR/functions.bash"
+source "$DOTFILES_BASH_DIR/aliases.bash"
+source "$DOTFILES_BASH_DIR/fzf.bash"
+source "$DOTFILES_BASH_DIR/completions.bash"
+
+[[ -r "$HOME/.config/dotfiles.local.bash" ]] && source "$HOME/.config/dotfiles.local.bash"
+
+unset DOTFILES_BASH_DIR

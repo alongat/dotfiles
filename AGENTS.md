@@ -1,18 +1,20 @@
-# Agent Guidelines for Dotfiles Repository
+# Agent Guidelines for Omarchy Dotfiles
 
 ## Build/Test Commands
 
-- `make` - Install all dotfiles and run install scripts
-- `make test` - Dry run to preview changes without applying them
-- `make dotfiles` - Create symlinks for dotfiles only
-- `make install` - Run all install.sh scripts and brew bundle
-- `make clean` - Remove broken symlinks
-- `make backup` - Backup existing dotfiles before changes
+- `make test` - Validate scripts and preview changes
+- `make install` - Install core packages and link configuration
+- `make dotfiles` - Back up conflicts and create managed symlinks
+- `make packages PACKAGE_GROUPS="core devops"` - Install package groups
+- `make packages-all` - Install all non-AUR package groups
+- `make verify` - Validate the installed configuration
+- `make clean` - Remove broken managed symlinks
 
 ## Code Style Guidelines
 
-- **Shell Scripts**: Use `#!/bin/bash` shebang, `set -e` for error handling
-- **File Structure**: Each tool has its own directory with install.sh, aliases.zsh, completion.zsh, path.zsh as needed
+- **Shell Scripts**: Use `#!/bin/bash` shebang and `set -e` for error handling
+- **Interactive Shell**: Extend Omarchy's Bash defaults; do not switch the login shell
+- **File Structure**: Put Bash fragments in `bash/` and package manifests in `packages/`
 - **Naming**: Use kebab-case for directories, snake_case for variables, descriptive function names
 - **Error Handling**: Always check command success with proper exit codes and error messages
 - **Output**: Use `echo "› Action"` for main actions, `echo "  Detail"` for sub-actions
@@ -20,59 +22,32 @@
 
 ## File Conventions
 
-- `.symlink` files are automatically linked to home directory (e.g., `gitconfig.symlink` → `~/.gitconfig`)
-- `install.sh` scripts handle tool-specific installation and configuration
-- `.zsh` files are sourced by zsh configuration (aliases, completions, paths)
+- Managed links are declared explicitly in `scripts/link-configs.sh`
+- Existing targets are backed up before links are created
+- `.zsh` files are retained only as migration references and are not loaded
+- Never modify `/usr/share/omarchy`; track user overrides under `omarchy/`
 - Use absolute paths in scripts, avoid relative path dependencies
 
-## Directory Structure
+## Omarchy Conventions
 
-Each tool directory typically contains:
-- `install.sh` - Installation and setup script (optional)
-- `aliases.zsh` - Shell aliases (sourced automatically)
-- `completion.zsh` - Shell completions (sourced automatically)
-- `path.zsh` - PATH modifications (sourced automatically)
-
-## install.sh Conventions
-
-When creating or modifying install.sh scripts:
-
-1. **Symlink to ~/.config**: Most tools expect config in `~/.config/<tool>/`. The install script should:
-   - Check if source config exists in dotfiles repo
-   - Create `~/.config/<tool>` directory if needed
-   - Create symlink from dotfiles to ~/.config location
-   - Handle existing files/links gracefully
-
-2. **Example pattern**:
-```bash
-#!/bin/bash
-set -e
-
-echo "› Setting up <tool> configuration"
-
-if [ ! -d ~/.config/<tool> ]; then
-    mkdir -p ~/.config/<tool>
-fi
-
-if [ ! -e ~/.config/<tool>/config ]; then
-    ln -s "$HOME/.dotfiles/<tool>/config" ~/.config/<tool>/config
-    echo "  ✅ config linked successfully"
-else
-    echo "  config already exists"
-fi
-```
-
-3. **Idempotency**: Scripts should be safe to run multiple times without errors or duplicate work.
+- Preserve the Omarchy bootstrap at the beginning of `~/.bashrc`
+- Prefer packaged Bash completions, then generated completion, then Carapace
+- Use `omarchy pkg add` and `omarchy pkg aur add` for packages
+- Keep Ghostty owned by Omarchy so dynamic themes continue to work
+- Validate Hyprland changes with `hyprctl reload` and `hyprctl configerrors`
+- Keep machine-specific and work-specific values out of version control
+- Make every installer idempotent and support a non-mutating preview
 
 ## Encrypted Files
 
 The `opencode/AGENTS.md` file is password-encrypted using OpenSSL:
 - `AGENTS.md.enc` is committed (encrypted)
 - `AGENTS.md` is gitignored (plaintext)
-- Decryption happens automatically during `make install`
+- OpenCode migration is pending; decrypt manually when working on that module
 - Use `agents-encrypt` / `agents-decrypt` aliases to manage
 
-## Brewfile
+## Branches
 
-`Brewfile` at repo root contains all Homebrew packages, casks, and Mac App Store apps. Organized by category with comments explaining each package.
-
+- `master` is the preserved macOS branch and remains the remote default for now
+- `omarchy` is the daily Linux branch
+- Cherry-pick isolated shared fixes instead of merging platform branches wholesale

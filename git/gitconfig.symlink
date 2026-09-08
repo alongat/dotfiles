@@ -1,6 +1,5 @@
-[user]
-	name = Alon Gat
-	email = along@torq.io
+[include]
+	path = ~/.config/git/local
 [github]
 	user = alongat
 [alias]
@@ -35,6 +34,7 @@
 	; prompt = false
 [core]
     pager = delta
+    excludesfile = ~/.gitignore_global
 
 [interactive]
     diffFilter = delta --color-only
@@ -59,9 +59,9 @@
 	path = nvim
 [credential "https://github.com"]
 	helper = 
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
 [credential "https://gist.github.com"]
 	helper = 
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
 [credential "https://dev.azure.com"]
 	useHttpPath = true

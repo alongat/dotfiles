@@ -1,0 +1,5 @@
+# Install explicitly with: make packages PACKAGE_GROUPS=aur
+carapace-bin
+google-cloud-cli
+k6-bin
+viddy-bin

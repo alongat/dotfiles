@@ -1,0 +1,5 @@
+# Copy the settings you need to ~/.config/dotfiles.local.bash.
+# That file is sourced after the tracked Bash configuration.
+
+# export GOPRIVATE="github.com/example-org"
+# export CLAUDE_PLUGIN_ROOT="$HOME/Code/example/plugin"
