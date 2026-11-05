@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""rex-agents: track Claude Code agents running in Rex blocks so they survive a Rex restart.
+"""rex-agents: track coding agents (Claude Code, Codex, OpenCode) running in Rex blocks so they
+survive a Rex restart.
 
 State: one JSON file per agent under $REX_AGENTS_STATE_DIR/agents/<block-uuid>.json
-(default ~/.local/state/rex-agents). Written atomically (temp file + rename), so the
-Claude Code hooks that update records never need a lock.
+(default ~/.local/state/rex-agents). Written atomically (temp file + rename), so the hooks
+that update records never need a lock.
 
 Commands
   list                      show every tracked agent
@@ -14,11 +15,13 @@ Commands
   wait ID [--state S...]    wait until the agent reaches a state
   restore                   reopen tabs for agents whose block no longer exists
   rm ID                     forget an agent (does not touch its transcript)
-  plan / mark / hook        used by the rex-agent launcher and by Claude Code hooks
+  plan / mark / hook        used by the rex-agent launcher and by the agents' hooks
+  codex-trust               (install) record trust for the rex-agents hooks in codex's config
 """
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -35,9 +38,10 @@ STATE_DIR = os.environ.get("REX_AGENTS_STATE_DIR") or os.path.join(HOME, ".local
 AGENTS_DIR = os.path.join(STATE_DIR, "agents")
 CONFIG_PATH = os.environ.get("REX_AGENTS_CONFIG") or os.path.join(HOME, ".config", "rex-agents", "config.json")
 LAUNCHER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rex-agent")
-DEFAULT_CONFIG = {"max_depth": 2, "max_children": 5}
+AGENTS = ("claude", "codex", "opencode")
+DEFAULT_CONFIG = {"max_depth": 2, "max_children": 5, "default_agent": "claude"}
 RESTART_PROMPT = "rex restarted; continue where you left off"
-# interrupted: claude went away without a clean exit (SIGHUP when the Rex server died)
+# interrupted: the agent went away without a clean exit (SIGHUP when the Rex server died)
 ACTIVE_STATES = {"starting", "running", "blocked", "idle", "interrupted"}
 MID_TURN_STATES = {"running", "blocked"}
 CLEAN_END_REASONS = {"exit", "logout", "prompt_input_exit", "clear", "bypass_permissions_disabled"}
@@ -48,6 +52,9 @@ REX_APP_BIN = os.path.join(
     HOME, "Library", "Application Support", "com.superlogical.rex", "RexServer", "Versions", "Current",
     "Rex Server.app", "Contents", "MacOS", "rex",
 )
+CODEX_HOME = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
+OPENCODE_DB = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share"),
+                           "opencode", "opencode.db")
 
 
 # ---------------------------------------------------------------- helpers
@@ -74,6 +81,8 @@ def load_config():
         env = os.environ.get(f"REX_AGENTS_{key.upper()}")
         if env:
             cfg[key] = int(env)
+    if os.environ.get("REX_AGENTS_DEFAULT_AGENT"):
+        cfg["default_agent"] = os.environ["REX_AGENTS_DEFAULT_AGENT"]
     return cfg
 
 
@@ -118,11 +127,13 @@ def new_record(uuid):
         "id": uuid,
         "block_id": f"block:{uuid}",
         "name": uuid[-8:],
+        "agent": None,
         "session_id": None,
         "transcript_path": None,
         "cwd": None,
         "model": None,
-        "claude_args": [],
+        "extra_args": [],
+        "env": {},
         "prompt": None,
         "status": "new",
         "prev_status": None,
@@ -137,6 +148,14 @@ def new_record(uuid):
         "broken_reason": None,
         "last_message": None,
     }
+
+
+def agent_of(rec):
+    return rec.get("agent") or "claude"
+
+
+def extra_args_of(rec):
+    return rec.get("extra_args") or rec.get("claude_args") or []  # claude_args: records from before --agent
 
 
 def all_records():
@@ -172,39 +191,104 @@ def encode_cwd(cwd):
 
 
 def transcript_for(rec):
+    """Path of the agent's own session file, or None. OpenCode keeps sessions in sqlite (no file)."""
     path = rec.get("transcript_path")
     if path:
         return path
-    if rec.get("session_id") and rec.get("cwd"):
-        return os.path.join(HOME, ".claude", "projects", encode_cwd(rec["cwd"]), f"{rec['session_id']}.jsonl")
+    sid = rec.get("session_id")
+    if not sid:
+        return None
+    agent = agent_of(rec)
+    if agent == "claude" and rec.get("cwd"):
+        return os.path.join(HOME, ".claude", "projects", encode_cwd(rec["cwd"]), f"{sid}.jsonl")
+    if agent == "codex":
+        hits = glob.glob(os.path.join(CODEX_HOME, "sessions", "*", "*", "*", f"rollout-*-{sid}.jsonl"))
+        return hits[0] if hits else None
     return None
 
 
-def last_assistant_text(path, max_bytes=4_000_000):
-    """Last assistant text block in a Claude Code transcript, or None."""
-    if not path or not os.path.exists(path):
-        return None
+def opencode_session_exists(sid, db=None):
+    import sqlite3
+    db = db or OPENCODE_DB
+    if not os.path.exists(db):
+        return False
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        try:
+            return con.execute("select 1 from session where id = ?", (sid,)).fetchone() is not None
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
+
+
+def session_exists(rec):
+    """(exists, detail): can this record's session be resumed by its agent?"""
+    sid = rec.get("session_id")
+    if not sid:
+        return False, "no session id"
+    if agent_of(rec) == "opencode":
+        db = (rec.get("env") or {}).get("XDG_DATA_HOME")
+        db = os.path.join(db, "opencode", "opencode.db") if db else None
+        ok = opencode_session_exists(sid, db)
+        return ok, f"opencode session {sid} in {db or OPENCODE_DB}"
+    path = transcript_for(rec)
+    return bool(path and os.path.exists(path)), f"transcript {path or 'unknown'}"
+
+
+def _tail_lines(path, max_bytes):
     size = os.path.getsize(path)
-    text = None
     with open(path, "rb") as fh:
         if size > max_bytes:
             fh.seek(size - max_bytes)
             fh.readline()
         for raw in fh:
             try:
-                entry = json.loads(raw)
+                yield json.loads(raw)
             except Exception:
                 continue
-            if entry.get("type") != "assistant":
-                continue
-            content = (entry.get("message") or {}).get("content")
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
-                if parts:
-                    text = "\n".join(parts).strip()
+
+
+def last_claude_text(path, max_bytes=4_000_000):
+    text = None
+    for entry in _tail_lines(path, max_bytes):
+        if entry.get("type") != "assistant":
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+            if parts:
+                text = "\n".join(parts).strip()
     return text
+
+
+def last_codex_text(path, max_bytes=4_000_000):
+    text = None
+    for entry in _tail_lines(path, max_bytes):
+        if entry.get("type") != "response_item":
+            continue
+        p = entry.get("payload") or {}
+        if p.get("type") != "message" or p.get("role") != "assistant":
+            continue
+        parts = [c.get("text", "") for c in p.get("content") or [] if isinstance(c, dict) and c.get("type") == "output_text"]
+        if parts:
+            text = "\n".join(parts).strip()
+    return text
+
+
+def last_assistant_text(rec):
+    """Last assistant text of the agent's session: parsed from the transcript when there is one,
+    else what the agent's hook reported at its last Stop."""
+    path = transcript_for(rec)
+    text = None
+    if path and os.path.exists(path):
+        try:
+            text = last_codex_text(path) if agent_of(rec) == "codex" else last_claude_text(path)
+        except OSError:
+            text = None
+    return text or rec.get("last_message")
 
 
 def rex_server_alive(timeout=0.5):
@@ -297,12 +381,28 @@ def wait_for(uuid, predicate, timeout):
         time.sleep(1)
 
 
+def parse_env(items):
+    env = {}
+    for item in items or []:
+        if "=" not in item:
+            die(f"--env expects KEY=VALUE, got {item!r}")
+        key, val = item.split("=", 1)
+        env[key] = val
+    return env
+
+
 # ---------------------------------------------------------------- commands
 
 def cmd_plan(args):
     """Called by the launcher. Decides fresh / resume / broken and records what it knows."""
     uuid = block_uuid(args.block)
     rec = read_record(uuid) or new_record(uuid)
+    cfg = load_config()
+    if args.agent:
+        if args.agent not in AGENTS:
+            die(f"unknown agent {args.agent!r}; one of {', '.join(AGENTS)}")
+        rec["agent"] = args.agent
+    rec["agent"] = rec.get("agent") or cfg["default_agent"]
     if args.name:
         rec["name"] = args.name
     if args.cwd:
@@ -318,7 +418,9 @@ def cmd_plan(args):
     if args.session:
         rec["session_id"] = args.session
     if args.extra:
-        rec["claude_args"] = args.extra
+        rec["extra_args"] = args.extra
+    if args.env:
+        rec["env"] = parse_env(args.env)
     rec["rex_session"] = os.environ.get("REX_SESSION")
     rec["rex_server"] = os.environ.get("REX_SERVER")
     rec["prev_status"] = rec.get("status")
@@ -327,15 +429,15 @@ def cmd_plan(args):
 
     action, initial = "fresh", rec.get("prompt") or ""
     if rec.get("session_id"):
-        path = transcript_for(rec)
-        if path and os.path.exists(path):
+        ok, detail = session_exists(rec)
+        if ok:
             action = "resume"
-            rec["transcript_path"] = path
+            rec["transcript_path"] = transcript_for(rec)
             was = rec.get("interrupted_from") if rec.get("prev_status") == "interrupted" else rec.get("prev_status")
             initial = RESTART_PROMPT if was in MID_TURN_STATES else ""
         else:
             action = "broken"
-            rec["broken_reason"] = f"transcript missing: {path}"
+            rec["broken_reason"] = f"session missing: {detail}"
             initial = ""
     rec["status"] = "broken" if action == "broken" else "starting"
     rec["last_launch"] = now()
@@ -349,6 +451,7 @@ def cmd_plan(args):
             fh.write(STATE_DIR + "\n")
     out = {
         "ACTION": action,
+        "AGENT": rec["agent"],
         "SESSION_ID": rec.get("session_id") or "",
         "CWD": rec.get("cwd") or "",
         "MODEL": rec.get("model") or "",
@@ -359,6 +462,9 @@ def cmd_plan(args):
     }
     for key, val in out.items():
         print(f"{key}={shlex.quote(str(val))}")
+    # extra args and env go out as shell arrays / assignments the launcher evals
+    print("EXTRA_ARGS=(" + " ".join(shlex.quote(a) for a in extra_args_of(rec)) + ")")
+    print("AGENT_ENV=(" + " ".join(shlex.quote(f"{k}={v}") for k, v in (rec.get("env") or {}).items()) + ")")
 
 
 def cmd_mark(args):
@@ -374,8 +480,21 @@ def cmd_mark(args):
     update_record(rec["id"], **fields)
 
 
+def infer_agent(payload):
+    if payload.get("agent") in AGENTS:
+        return payload["agent"]
+    env = os.environ.get("REX_AGENT_KIND")
+    if env in AGENTS:
+        return env
+    path = payload.get("transcript_path") or ""
+    if "/sessions/" in path and os.path.basename(path).startswith("rollout-"):
+        return "codex"
+    return "claude"
+
+
 def cmd_hook(_args):
-    """Claude Code hook entry point. Reads the hook JSON on stdin; never fails the session."""
+    """Hook entry point for all agents. Reads the hook JSON on stdin; never fails the session.
+    Claude Code and Codex send it natively; the OpenCode plugin sends the same shape."""
     block = os.environ.get("REX_BLOCK")
     if not block or os.environ.get("HERDR_ENV") == "1":  # herdr panes inherit REX_BLOCK when herdr runs in a rex tab
         return
@@ -383,18 +502,19 @@ def cmd_hook(_args):
         payload = json.load(sys.stdin)
     except Exception:
         return
-    if payload.get("agent_id"):  # built-in Task subagents share the parent's block; ignore them
-        return
+    if payload.get("agent_id") and payload.get("hook_event_name") not in ("SessionStart", "SessionEnd"):
+        return  # built-in subagents share the parent's block; ignore them
     uuid = block_uuid(block)
     rec = read_record(uuid) or new_record(uuid)
     event = payload.get("hook_event_name")
-    # A claude that Rex's death is still tearing down can fire SessionEnd after the relaunch
-    # already wrote a newer record. The launcher stamps each claude with its launch number.
+    # An agent that Rex's death is still tearing down can fire SessionEnd after the relaunch
+    # already wrote a newer record. The launcher stamps each process with its launch number.
     launch = os.environ.get("REX_AGENT_LAUNCH")
     if launch and launch.isdigit() and int(launch) < rec.get("launches", 0):
         return
     stamp = now()
     rec["last_activity"] = stamp
+    rec["agent"] = rec.get("agent") or infer_agent(payload)
     if payload.get("session_id"):
         if rec.get("session_id") and rec["session_id"] != payload["session_id"]:
             rec.setdefault("previous_session_ids", []).append(rec["session_id"])
@@ -403,7 +523,7 @@ def cmd_hook(_args):
         rec["transcript_path"] = payload["transcript_path"]
     if payload.get("cwd") and not rec.get("cwd"):
         rec["cwd"] = payload["cwd"]
-        if rec.get("name") == uuid[-8:]:  # a plain `claude` typed in a rex shell: name it after its directory
+        if rec.get("name") == uuid[-8:]:  # an agent typed by hand in a rex shell: name it after its directory
             rec["name"] = os.path.basename(payload["cwd"].rstrip("/")) or rec["name"]
     if payload.get("model"):
         rec["model"] = payload["model"]
@@ -423,14 +543,22 @@ def cmd_hook(_args):
         rec["prompt_count"] = rec.get("prompt_count", 0) + 1
         rec["status"] = "running"
         rec["last_prompt"] = (payload.get("prompt") or "")[:500]
-    elif event == "Stop":
+    elif event in ("Stop", "Interrupt"):  # Interrupt: codex, the user cancelled the turn
         rec["stop_count"] = rec.get("stop_count", 0) + 1
         rec["status"] = "idle"
-        rec["last_message"] = (last_assistant_text(rec.get("transcript_path")) or "")[:2000] or rec.get("last_message")
+        reported = (payload.get("last_assistant_message") or "").strip()  # codex and opencode send it
+        if reported:
+            rec["last_message"] = reported[:2000]
+        elif rec.get("transcript_path"):
+            rec["last_message"] = (last_assistant_text(rec) or "")[:2000] or rec.get("last_message")
     elif event == "PostToolUse":
         if rec.get("status") != "blocked":
             return  # nothing to record; the hook guard normally skips this event entirely
         rec["status"] = "running"  # a tool ran, so the permission prompt was answered
+    elif event == "PermissionRequest":  # codex
+        rec["status"] = "blocked"
+        tool_input = payload.get("tool_input") or {}
+        rec["blocked_on"] = f"{payload.get('tool_name') or 'tool'}: {tool_input.get('command') or ''}"[:500]
     elif event == "Notification":
         kind = payload.get("notification_type")
         if kind in ("permission_prompt", "elicitation_dialog"):
@@ -466,7 +594,7 @@ def cmd_should_resume(args):
         sys.exit(1)
     last = rec.get("last_launch")
     started = rec.get("last_session_start") or ""
-    if last and started < last:  # the previous launch never reached SessionStart: claude is failing early
+    if last and started < last:  # the previous launch never reached SessionStart: the agent is failing early
         try:
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
         except ValueError:
@@ -475,7 +603,7 @@ def cmd_should_resume(args):
             print(f"{rec['name']}: launched {int(age)}s ago; not relaunching (crash loop guard). "
                   f"Run 'rex-agent' to retry.")
             sys.exit(2)
-    print(f"{rec['name']}: {rec.get('status')} session {rec['session_id'][:8]}")
+    print(f"{rec['name']}: {agent_of(rec)} {rec.get('status')} session {rec['session_id'][:8]}")
 
 
 def cmd_list(args):
@@ -491,25 +619,26 @@ def cmd_list(args):
         live = live_block_ids()
     except SystemExit:
         pass
-    print(f"{'ID':9} {'NAME':28} {'STATUS':9} {'TAB':5} {'SESSION':10} {'DEPTH':5} {'LAST ACTIVITY':20} CWD")
+    print(f"{'ID':9} {'NAME':24} {'AGENT':9} {'STATUS':9} {'TAB':5} {'SESSION':10} {'DEPTH':5} {'LAST ACTIVITY':20} CWD")
     for r in recs:
         tab = "-" if live is None else ("open" if r["id"] in live else "gone")
         sess = (r.get("session_id") or "")[:8]
         name = r.get("name") or ""
         if r.get("parent_id"):
             name = "↳ " + name
-        print(f"{r['id'][-8:]:9} {name[:28]:28} {r.get('status') or '':9} {tab:5} {sess:10} {r.get('depth', 0):<5} "
-              f"{(r.get('last_activity') or '')[:19]:20} {r.get('cwd') or ''}")
+        print(f"{r['id'][-8:]:9} {name[:24]:24} {agent_of(r):9} {r.get('status') or '':9} {tab:5} {sess:10} "
+              f"{r.get('depth', 0):<5} {(r.get('last_activity') or '')[:19]:20} {r.get('cwd') or ''}")
 
 
 def cmd_status(args):
     rec = resolve(args.id)
-    last = last_assistant_text(transcript_for(rec)) or rec.get("last_message")
+    last = last_assistant_text(rec)
     out = {"state": public_status(rec), "last_message": last, **rec}
     if args.json:
         print(json.dumps(out, indent=2))
         return
     print(f"{rec['name']} ({rec['id'][-8:]}): {public_status(rec)} [{rec.get('status')}]")
+    print(f"  agent     {agent_of(rec)}")
     print(f"  session   {rec.get('session_id')}")
     print(f"  cwd       {rec.get('cwd')}")
     print(f"  model     {rec.get('model') or 'default'}")
@@ -525,9 +654,12 @@ def cmd_status(args):
             print(f"    {line}")
 
 
-def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, extra=None,
-          rex_session=None, server=None, timeout=90, label=None, focus=False):
+def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, extra=None, agent=None,
+          env=None, rex_session=None, server=None, timeout=90, label=None, focus=False):
     cfg = load_config()
+    agent = agent or cfg["default_agent"]
+    if agent not in AGENTS:
+        die(f"unknown agent {agent!r}; one of {', '.join(AGENTS)}")
     cwd = os.path.abspath(cwd or os.getcwd())
     if not os.path.isdir(cwd):
         die(f"cwd does not exist: {cwd}")
@@ -552,7 +684,7 @@ def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, ex
             die("no rex session to open a tab in; pass --rex-session")
         rex_session = sessions[0]["session_id"]
 
-    launcher = [LAUNCHER, "--name", name]
+    launcher = [LAUNCHER, "--name", name, "--agent", agent]
     if model:
         launcher += ["--model", model]
     if session:
@@ -563,6 +695,8 @@ def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, ex
         launcher += ["--prompt", prompt]
     if os.environ.get("REX_AGENTS_STATE_DIR"):
         launcher += ["--state-dir", os.environ["REX_AGENTS_STATE_DIR"]]
+    for key, val in (env or {}).items():
+        launcher += ["--env", f"{key}={val}"]
     if extra:
         launcher += ["--", *extra]
 
@@ -570,7 +704,7 @@ def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, ex
                        f"--focus={'true' if focus else 'false'}", "--", *launcher, server=server)
     block = created["block_ids"][0]
     uuid = block_uuid(block)
-    # The launcher writes the record at once; the SessionStart hook fills in the session id.
+    # The launcher writes the record at once; the agent's SessionStart hook fills in the session id.
     rec = wait_for(uuid, lambda r: bool(r.get("session_id")) or r.get("status") == "broken", timeout)
     if rec is None:
         rec = read_record(uuid) or {"id": uuid}
@@ -584,11 +718,12 @@ def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, ex
 
 def cmd_spawn(args):
     if not args.session and not args.prompt:
-        die("spawn needs --prompt (new agent) or --session (resume an existing Claude session)")
+        die("spawn needs --prompt (new agent) or --session (resume an existing session)")
     rec = spawn(args.name, prompt=args.prompt, cwd=args.cwd, model=args.model, session=args.session,
-                parent=args.parent, extra=args.extra, rex_session=args.rex_session, server=args.server,
-                timeout=args.timeout, focus=args.focus)
-    out = {k: rec.get(k) for k in ("id", "block_id", "name", "session_id", "cwd", "status", "window_id", "parent_id", "warning")}
+                parent=args.parent, extra=args.extra, agent=args.agent, env=parse_env(args.env),
+                rex_session=args.rex_session, server=args.server, timeout=args.timeout, focus=args.focus)
+    out = {k: rec.get(k) for k in ("id", "block_id", "name", "agent", "session_id", "cwd", "status", "window_id",
+                                   "parent_id", "warning")}
     print(json.dumps(out, indent=2))
 
 
@@ -614,9 +749,9 @@ def cmd_result(args):
     final = wait_for(rec["id"], lambda r: is_done(r) or r.get("status") in ("ended", "broken", "blocked"), args.timeout)
     if final is None:
         die(f"{rec['name']} still running after {args.timeout}s", code=3)
-    text = last_assistant_text(transcript_for(final)) or final.get("last_message") or ""
+    text = last_assistant_text(final) or ""
     if args.json:
-        print(json.dumps({"id": final["id"], "name": final["name"], "state": public_status(final),
+        print(json.dumps({"id": final["id"], "name": final["name"], "agent": agent_of(final), "state": public_status(final),
                           "status": final.get("status"), "result": text}, indent=2))
         return
     if final.get("status") == "blocked":
@@ -645,16 +780,16 @@ def cmd_restore(args):
         if not rec.get("session_id"):
             print(f"skip {rec['name']}: no session id recorded")
             continue
-        path = transcript_for(rec)
-        if not path or not os.path.exists(path):
-            update_record(rec["id"], status="broken", broken_reason=f"transcript missing: {path}")
-            print(f"broken {rec['name']}: transcript missing")
+        ok, detail = session_exists(rec)
+        if not ok:
+            update_record(rec["id"], status="broken", broken_reason=f"session missing: {detail}")
+            print(f"broken {rec['name']}: {detail}")
             continue
         if args.dry_run:
-            print(f"would reopen {rec['name']} ({rec['session_id'][:8]}) in {rec['cwd']}")
+            print(f"would reopen {rec['name']} ({agent_of(rec)} {rec['session_id'][:8]}) in {rec['cwd']}")
             continue
         new = spawn(rec["name"], cwd=rec["cwd"], model=rec.get("model"), session=rec["session_id"],
-                    parent=rec.get("parent_id"), extra=rec.get("claude_args"),
+                    parent=rec.get("parent_id"), extra=extra_args_of(rec), agent=agent_of(rec), env=rec.get("env"),
                     rex_session=args.rex_session or rec.get("rex_session"), server=args.server)
         update_record(rec["id"], status="stopped", superseded_by=new["id"])
         print(f"reopened {rec['name']} as {new['id'][-8:]} (session {rec['session_id'][:8]})")
@@ -664,6 +799,148 @@ def cmd_rm(args):
     rec = resolve(args.id)
     os.remove(record_path(rec["id"]))
     print(f"forgot {rec['name']} ({rec['id'][-8:]}); transcript left in place")
+
+
+# ---------------------------------------------------------------- codex hook trust
+
+CODEX_EVENT_LABELS = {
+    "PreToolUse": "pre_tool_use", "PermissionRequest": "permission_request", "PostToolUse": "post_tool_use",
+    "PreCompact": "pre_compact", "PostCompact": "post_compact", "SessionStart": "session_start",
+    "SessionEnd": "session_end", "UserPromptSubmit": "user_prompt_submit", "SubagentStart": "subagent_start",
+    "SubagentStop": "subagent_stop", "Stop": "stop", "Interrupt": "interrupt",
+}
+
+
+def codex_hook_hash(event, handler, matcher=None):
+    """Codex's trust hash for one command hook: sha256 of the sorted, compact JSON of the normalized
+    identity {event_name, matcher?, hooks:[handler]} (codex-rs hooks/src/engine/discovery.rs +
+    config/src/fingerprint.rs). Timeouts: SessionEnd/Interrupt default 1 and are capped at 3,
+    everything else defaults to 600."""
+    timeout = handler.get("timeout")
+    if event in ("SessionEnd", "Interrupt"):
+        timeout = max(1, min(int(timeout if timeout is not None else 1), 3))
+    else:
+        timeout = max(1, int(timeout if timeout is not None else 600))
+    norm = {"type": "command", "command": handler["command"], "timeout": timeout, "async": bool(handler.get("async", False))}
+    if handler.get("statusMessage"):
+        norm["statusMessage"] = handler["statusMessage"]
+    identity = {"event_name": CODEX_EVENT_LABELS[event], "hooks": [norm]}
+    if matcher:
+        identity["matcher"] = matcher
+    data = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")
+CODEX_ONLY_EVENTS = ("PermissionRequest", "Interrupt")
+CLAUDE_ONLY_EVENTS = ("Notification",)
+
+
+def hook_entries(for_agent):
+    """The hooks.json / settings.json entries rex-agents installs. The command is also the marker
+    that keeps re-runs from duplicating them. PostToolUse fires on every tool call, so its shell
+    guard only runs python while the record says blocked."""
+    me = os.path.abspath(__file__)
+    cmd = f"/bin/sh -c '[ -n \"$REX_BLOCK\" ] || exit 0; exec \"{me}\" hook'"
+    post = ("/bin/sh -c '[ -n \"$REX_BLOCK\" ] || exit 0; "
+            "f=\"${REX_AGENTS_STATE_DIR:-$HOME/.local/state/rex-agents}/agents/${REX_BLOCK#block:}.json\"; "
+            f"grep -q \"\\\"blocked\\\"\" \"$f\" 2>/dev/null || exit 0; exec \"{me}\" hook'")
+    events = list(HOOK_EVENTS) + list(CODEX_ONLY_EVENTS if for_agent == "codex" else CLAUDE_ONLY_EVENTS) + ["PostToolUse"]
+    out = {}
+    for event in events:
+        timeout = 3 if event in ("SessionEnd", "Interrupt") else 5
+        out[event] = {"hooks": [{"type": "command", "command": post if event == "PostToolUse" else cmd, "timeout": timeout}]}
+    return out
+
+
+def merge_hooks(settings, for_agent, marker="rex-agents"):
+    """Add missing rex-agents entries to a settings/hooks.json dict in place. Returns True if changed."""
+    hooks = settings.setdefault("hooks", {})
+    changed = False
+    for event, entry in hook_entries(for_agent).items():
+        entries = hooks.setdefault(event, [])
+        if any(marker in h.get("command", "") for e in entries for h in e.get("hooks", [])):
+            continue
+        entries.append(entry)
+        changed = True
+    return changed
+
+
+def backup(path):
+    dst = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copy2(path, dst)
+    return dst
+
+
+def cmd_install_hooks(args):
+    """Merge the rex-agents hooks into a Claude settings.json or a codex hooks.json (same format)."""
+    path = os.path.abspath(args.path)
+    try:
+        with open(path) as fh:
+            settings = json.load(fh)
+    except FileNotFoundError:
+        if args.agent == "claude":
+            die(f"{path} not found; run claude once first")
+        settings = {"hooks": {}}
+    if not merge_hooks(settings, args.agent):
+        print(f"install-hooks: {args.agent} hooks already installed in {path}")
+        return
+    note = ""
+    if os.path.exists(path):
+        note = f" (backup {backup(path)})"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(settings, fh, indent=2)
+        fh.write("\n")
+    print(f"install-hooks: {args.agent} hooks written to {path}{note}")
+
+
+def cmd_codex_trust(args):
+    """Append [hooks.state."<hooks.json>:<event>:<group>:<handler>"] trusted_hash entries to codex's
+    config.toml for every hook whose command matches --marker (default: rex-agents). Entries that
+    already exist are left alone (codex rewrites them itself from /hooks)."""
+    import tomllib
+    # The key must match the path codex builds: it canonicalises CODEX_HOME, so on macOS a temp
+    # dir under /var becomes /private/var. realpath does the same.
+    hooks_path = os.path.realpath(os.path.expanduser(args.hooks_json))
+    config_path = os.path.expanduser(args.config)
+    with open(hooks_path) as fh:
+        hooks = json.load(fh).get("hooks", {})
+    try:
+        with open(config_path, "rb") as fh:
+            existing = tomllib.load(fh).get("hooks", {}).get("state", {}) or {}
+    except FileNotFoundError:
+        existing = {}
+    additions = []
+    for event, groups in hooks.items():
+        if event not in CODEX_EVENT_LABELS:
+            continue
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate(group.get("hooks", [])):
+                if handler.get("type", "command") != "command" or args.marker not in handler.get("command", ""):
+                    continue
+                key = f"{hooks_path}:{CODEX_EVENT_LABELS[event]}:{gi}:{hi}"
+                digest = codex_hook_hash(event, handler, group.get("matcher"))
+                state = existing.get(key) or {}
+                if state.get("trusted_hash") == digest:
+                    continue
+                if state.get("trusted_hash"):
+                    print(f"codex-trust: {key} is trusted with another hash; review it with /hooks in codex", file=sys.stderr)
+                    continue
+                additions.append((key, digest))
+    if not additions:
+        print("codex-trust: nothing to add")
+        return
+    if args.dry_run:
+        for key, digest in additions:
+            print(f"would trust {key} {digest}")
+        return
+    note = f" (backup {backup(config_path)})" if os.path.exists(config_path) else ""
+    with open(config_path, "a") as fh:
+        fh.write("\n")
+        for key, digest in additions:
+            fh.write(f'[hooks.state.{json.dumps(key)}]\ntrusted_hash = {json.dumps(digest)}\n\n')
+    print(f"codex-trust: trusted {len(additions)} rex-agents hook(s) in {config_path}{note}")
 
 
 # ---------------------------------------------------------------- main
@@ -682,25 +959,27 @@ def main():
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_status)
 
-    p = sub.add_parser("spawn", help="open a rex tab running a Claude Code agent")
+    p = sub.add_parser("spawn", help="open a rex tab running an agent")
     p.add_argument("--name", required=True)
+    p.add_argument("--agent", choices=AGENTS, help="claude (default), codex or opencode")
     p.add_argument("--prompt", help="first prompt for a new agent")
-    p.add_argument("--session", help="existing Claude session id to resume instead of starting fresh")
+    p.add_argument("--session", help="existing session id to resume instead of starting fresh")
     p.add_argument("--cwd", help="working directory (default: current)")
     p.add_argument("--model")
+    p.add_argument("--env", action="append", help="KEY=VALUE exported for the agent (repeatable, kept across restarts)")
     p.add_argument("--parent", default=os.environ.get("REX_BLOCK"),
                    help="parent agent block (default: $REX_BLOCK, i.e. the calling agent)")
     p.add_argument("--no-parent", action="store_true", help="spawn a top-level agent even from inside an agent")
     p.add_argument("--rex-session", help="rex session to open the tab in (default: $REX_SESSION)")
     p.add_argument("--focus", action="store_true", help="switch to the new tab")
     p.add_argument("--timeout", type=int, default=90, help="seconds to wait for the session id")
-    p.add_argument("extra", nargs="*", help="extra claude arguments after --")
+    p.add_argument("extra", nargs="*", help="extra arguments for the agent CLI, after --")
     p.set_defaults(fn=cmd_spawn)
 
     p = sub.add_parser("send", help="type a message into an agent's tab")
     p.add_argument("id")
     p.add_argument("message", nargs="?", help="text (default: stdin)")
-    p.add_argument("--wait", action="store_true", help="wait until Claude acknowledges the prompt")
+    p.add_argument("--wait", action="store_true", help="wait until the agent acknowledges the prompt")
     p.set_defaults(fn=cmd_send)
 
     p = sub.add_parser("result", help="wait for the agent to finish its turn and print its last message")
@@ -726,6 +1005,7 @@ def main():
 
     p = sub.add_parser("plan", help="(launcher) decide fresh/resume/broken for a block")
     p.add_argument("--block", required=True)
+    p.add_argument("--agent")
     p.add_argument("--name")
     p.add_argument("--cwd")
     p.add_argument("--model")
@@ -733,6 +1013,7 @@ def main():
     p.add_argument("--parent")
     p.add_argument("--depth", type=int)
     p.add_argument("--session")
+    p.add_argument("--env", action="append")
     p.add_argument("extra", nargs="*")
     p.set_defaults(fn=cmd_plan)
 
@@ -743,12 +1024,24 @@ def main():
     p.add_argument("--pid", type=int)
     p.set_defaults(fn=cmd_mark)
 
-    p = sub.add_parser("hook", help="(Claude Code hook) consume a hook event from stdin")
+    p = sub.add_parser("hook", help="(agent hook) consume a hook event from stdin")
     p.set_defaults(fn=cmd_hook)
 
     p = sub.add_parser("should-resume", help="(zsh startup) exit 0 if this block's agent should be relaunched")
     p.add_argument("block")
     p.set_defaults(fn=cmd_should_resume)
+
+    p = sub.add_parser("install-hooks", help="(install) merge the rex-agents hooks into a hooks file")
+    p.add_argument("--agent", choices=("claude", "codex"), required=True)
+    p.add_argument("--path", required=True, help="~/.claude/settings.json or ~/.codex/hooks.json")
+    p.set_defaults(fn=cmd_install_hooks)
+
+    p = sub.add_parser("codex-trust", help="(install) trust the rex-agents hooks in codex's config.toml")
+    p.add_argument("--hooks-json", default=os.path.join(CODEX_HOME, "hooks.json"))
+    p.add_argument("--config", default=os.path.join(CODEX_HOME, "config.toml"))
+    p.add_argument("--marker", default="rex-agents")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(fn=cmd_codex_trust)
 
     argv = sys.argv[1:]
     args = ap.parse_args(argv)

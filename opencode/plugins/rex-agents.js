@@ -1,0 +1,1 @@
+../../rex/opencode/rex-agents.js

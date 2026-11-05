@@ -1,25 +1,29 @@
 #!/bin/bash
-# rex-agent: run Claude Code inside a Rex block so the session survives a Rex restart.
+# rex-agent: run a coding agent (Claude Code, Codex or OpenCode) inside a Rex block so the
+# session survives a Rex restart.
 #
-# Rex replays a block's command (and cwd) when the server restarts, so this script is the
-# block's command instead of a bare `claude`. On every start it asks `rex-agents plan`
-# whether this block already has a Claude session recorded:
-#   fresh   no record            -> claude [--model M] [PROMPT]
-#   resume  record + transcript  -> cd <recorded cwd>; claude --resume <id> [restart message]
-#   broken  record, no transcript-> mark broken, print why, leave a shell in the tab
-# The Claude Code hooks installed by rex/install.sh keep the record up to date.
+# This script is the block's command instead of a bare `claude`/`codex`/`opencode`. On every
+# start it asks `rex-agents plan` whether this block already has a session recorded:
+#   fresh   no record            -> <agent> [model] [PROMPT]
+#   resume  record + session     -> cd <recorded cwd>; <agent> resume <id> [restart message]
+#   broken  record, no session   -> mark broken, print why, leave a shell in the tab
+# The agents' hooks (Claude Code and Codex hooks, the OpenCode plugin) keep the record current.
 #
-# Usage: rex-agent [--name N] [--model M] [--prompt TEXT] [--session ID]
-#                  [--parent BLOCK --depth N] [--state-dir DIR] [-- extra claude args]
+# Usage: rex-agent [--agent claude|codex|opencode] [--name N] [--model M] [--prompt TEXT]
+#                  [--session ID] [--parent BLOCK --depth N] [--state-dir DIR]
+#                  [--env KEY=VALUE]... [-- extra agent args]
 set -u
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RA="$BIN_DIR/rex-agents"
+CODEX_APP_BIN="/Applications/ChatGPT.app/Contents/Resources/codex"
 
-name="" model="" prompt="" session="" parent="" depth="" state_dir=""
+agent="" name="" model="" prompt="" session="" parent="" depth="" state_dir=""
 extra=()
+envs=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --agent)     agent="$2"; shift 2 ;;
     --name)      name="$2"; shift 2 ;;
     --model)     model="$2"; shift 2 ;;
     --prompt)    prompt="$2"; shift 2 ;;
@@ -27,66 +31,123 @@ while [ $# -gt 0 ]; do
     --parent)    parent="$2"; shift 2 ;;
     --depth)     depth="$2"; shift 2 ;;
     --state-dir) state_dir="$2"; shift 2 ;;
+    --env)       envs+=("$2"); shift 2 ;;
     --)          shift; extra=("$@"); break ;;
     *)           extra+=("$1"); shift ;;
   esac
 done
 
 if [ -n "$state_dir" ]; then
-  export REX_AGENTS_STATE_DIR="$state_dir"   # inherited by claude, so the hooks write to the same place
+  export REX_AGENTS_STATE_DIR="$state_dir"   # inherited by the agent, so its hooks write to the same place
 fi
 
+# cli AGENT -> prints the executable, or fails. Codex ships inside the ChatGPT app and is not on PATH.
+cli() {
+  case "$1" in
+    claude|opencode) command -v "$1" ;;
+    codex) command -v codex 2>/dev/null || { [ -x "$CODEX_APP_BIN" ] && echo "$CODEX_APP_BIN"; } ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ -z "${REX_BLOCK:-}" ]; then
-  echo "rex-agent: REX_BLOCK is not set (not inside a Rex block); starting claude without persistence" >&2
-  exec claude ${extra[@]+"${extra[@]}"}
+  agent="${agent:-claude}"
+  echo "rex-agent: REX_BLOCK is not set (not inside a Rex block); starting $agent without persistence" >&2
+  exec "$(cli "$agent")" ${extra[@]+"${extra[@]}"}
 fi
 
 plan_args=(--block "$REX_BLOCK" --cwd "$PWD")
+[ -n "$agent" ]   && plan_args+=(--agent "$agent")
 [ -n "$name" ]    && plan_args+=(--name "$name")
 [ -n "$model" ]   && plan_args+=(--model "$model")
 [ -n "$prompt" ]  && plan_args+=(--prompt "$prompt")
 [ -n "$session" ] && plan_args+=(--session "$session")
 [ -n "$parent" ]  && plan_args+=(--parent "$parent")
 [ -n "$depth" ]   && plan_args+=(--depth "$depth")
+for kv in ${envs[@]+"${envs[@]}"}; do plan_args+=(--env "$kv"); done
 [ ${#extra[@]} -gt 0 ] && plan_args+=(-- ${extra[@]+"${extra[@]}"})
 
 plan="$("$RA" plan "${plan_args[@]}")" || {
-  echo "rex-agent: could not read agent state; starting claude without persistence" >&2
-  exec claude ${extra[@]+"${extra[@]}"}
+  echo "rex-agent: could not read agent state; starting ${agent:-claude} without persistence" >&2
+  exec "$(cli "${agent:-claude}")" ${extra[@]+"${extra[@]}"}
 }
-eval "$plan"   # ACTION, SESSION_ID, CWD, MODEL, INITIAL_PROMPT, NAME, REASON, LAUNCHES (shell-quoted by rex-agents)
+# ACTION, AGENT, SESSION_ID, CWD, MODEL, INITIAL_PROMPT, NAME, REASON, LAUNCHES, EXTRA_ARGS, AGENT_ENV
+# (shell-quoted by rex-agents; EXTRA_ARGS and AGENT_ENV come back from the record on a resume)
+eval "$plan"
 
+for kv in ${AGENT_ENV[@]+"${AGENT_ENV[@]}"}; do export "$kv"; done
+
+bin="$(cli "$AGENT")" || {
+  echo "rex-agent: ❌ $AGENT is not installed (not on PATH)" >&2
+  "$RA" mark "$REX_BLOCK" --status broken >/dev/null 2>&1 || true
+  exec "${SHELL:-/bin/zsh}" -l
+}
+
+# Build the command line. Each CLI spells "model", "resume" and "first prompt" differently:
+#   claude   claude   [--model M] [--resume ID] [PROMPT]
+#   codex    codex    [-m M] [PROMPT]            |  codex resume ID [PROMPT]
+#   opencode opencode [-m M] [--prompt P]        |  opencode --session ID [--prompt P]
 args=()
-[ -n "$MODEL" ] && args+=(--model "$MODEL")
-args+=(${extra[@]+"${extra[@]}"})
-
 case "$ACTION" in
   resume)
     if [ -n "$CWD" ] && [ -d "$CWD" ]; then
       cd "$CWD" || true
     fi
-    echo "rex-agent: resuming ${NAME:-agent} (session ${SESSION_ID:0:8}) in $PWD"
-    args+=(--resume "$SESSION_ID")
-    [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT")
+    echo "rex-agent: resuming ${NAME:-agent} ($AGENT session ${SESSION_ID:0:8}) in $PWD"
+    case "$AGENT" in
+      claude)
+        [ -n "$MODEL" ] && args+=(--model "$MODEL")
+        args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} --resume "$SESSION_ID")
+        [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT") ;;
+      codex)
+        args+=(resume ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$SESSION_ID")
+        [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT") ;;
+      opencode)
+        args+=(--session "$SESSION_ID" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+        [ -n "$INITIAL_PROMPT" ] && args+=(--prompt "$INITIAL_PROMPT") ;;
+    esac
     ;;
   fresh)
-    echo "rex-agent: starting ${NAME:-agent} in $PWD"
-    [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT")
+    echo "rex-agent: starting ${NAME:-agent} ($AGENT) in $PWD"
+    case "$AGENT" in
+      claude)
+        [ -n "$MODEL" ] && args+=(--model "$MODEL")
+        args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+        [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT") ;;
+      codex)
+        [ -n "$MODEL" ] && args+=(-m "$MODEL")
+        args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+        [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT") ;;
+      opencode)
+        [ -n "$MODEL" ] && args+=(-m "$MODEL")
+        args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+        [ -n "$INITIAL_PROMPT" ] && args+=(--prompt "$INITIAL_PROMPT") ;;
+    esac
     ;;
   broken|*)
     echo "rex-agent: ❌ cannot resume ${NAME:-agent}: ${REASON:-unknown reason}" >&2
     echo "rex-agent: the record is marked broken. Run 'rex-agents status $REX_BLOCK' for details," >&2
-    echo "           or start a new agent in this tab with: rex-agent --name ${NAME:-agent}" >&2
+    echo "           or start a new agent in this tab with: rex-agent --agent $AGENT --name ${NAME:-agent}" >&2
     exec "${SHELL:-/bin/zsh}" -l
     ;;
 esac
 
-export REX_AGENT_NAME="${NAME:-}" REX_AGENT_LAUNCH="${LAUNCHES:-0}"
+# REX_AGENT_KIND tells the shared hook which agent is talking; REX_AGENT_SESSION lets the OpenCode
+# plugin report a resume before the first prompt; REX_AGENT_LAUNCH lets the hook drop events from
+# a previous launch of this block that is still shutting down.
+export REX_AGENT_NAME="${NAME:-}" REX_AGENT_KIND="$AGENT" REX_AGENT_LAUNCH="${LAUNCHES:-0}"
+if [ "$ACTION" = resume ]; then export REX_AGENT_SESSION="$SESSION_ID"; else unset REX_AGENT_SESSION; fi
 # This is a top-level agent even when spawned from inside another Claude session: drop the
 # nested-session markers, or Claude Code treats it as a child session and keeps no transcript.
 unset CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED \
       CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_PID CLAUDE_CODE_ENTRYPOINT
 "$RA" mark "$REX_BLOCK" --pid $$ >/dev/null 2>&1 || true
-# exec keeps claude as the block's direct child: Rex's SIGTERM/SIGHUP on shutdown reach it
+# Codex fires no SessionStart hook when it resumes a thread, so report the resume here; the
+# record would otherwise stay "starting" until the next prompt. (Claude and OpenCode report theirs.)
+if [ "$ACTION" = resume ] && [ "$AGENT" = codex ]; then
+  printf '{"hook_event_name":"SessionStart","source":"resume","agent":"codex","session_id":"%s"}' "$SESSION_ID" \
+    | "$RA" hook >/dev/null 2>&1 || true
+fi
+# exec keeps the agent as the block's direct child: Rex's SIGTERM/SIGHUP on shutdown reach it
 # unchanged, and every state write already happened inside the hooks, so nothing needs flushing.
-exec claude ${args[@]+"${args[@]}"}
+exec "$bin" ${args[@]+"${args[@]}"}
