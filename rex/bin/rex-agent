@@ -1,0 +1,92 @@
+#!/bin/bash
+# rex-agent: run Claude Code inside a Rex block so the session survives a Rex restart.
+#
+# Rex replays a block's command (and cwd) when the server restarts, so this script is the
+# block's command instead of a bare `claude`. On every start it asks `rex-agents plan`
+# whether this block already has a Claude session recorded:
+#   fresh   no record            -> claude [--model M] [PROMPT]
+#   resume  record + transcript  -> cd <recorded cwd>; claude --resume <id> [restart message]
+#   broken  record, no transcript-> mark broken, print why, leave a shell in the tab
+# The Claude Code hooks installed by rex/install.sh keep the record up to date.
+#
+# Usage: rex-agent [--name N] [--model M] [--prompt TEXT] [--session ID]
+#                  [--parent BLOCK --depth N] [--state-dir DIR] [-- extra claude args]
+set -u
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RA="$BIN_DIR/rex-agents"
+
+name="" model="" prompt="" session="" parent="" depth="" state_dir=""
+extra=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name)      name="$2"; shift 2 ;;
+    --model)     model="$2"; shift 2 ;;
+    --prompt)    prompt="$2"; shift 2 ;;
+    --session)   session="$2"; shift 2 ;;
+    --parent)    parent="$2"; shift 2 ;;
+    --depth)     depth="$2"; shift 2 ;;
+    --state-dir) state_dir="$2"; shift 2 ;;
+    --)          shift; extra=("$@"); break ;;
+    *)           extra+=("$1"); shift ;;
+  esac
+done
+
+if [ -n "$state_dir" ]; then
+  export REX_AGENTS_STATE_DIR="$state_dir"   # inherited by claude, so the hooks write to the same place
+fi
+
+if [ -z "${REX_BLOCK:-}" ]; then
+  echo "rex-agent: REX_BLOCK is not set (not inside a Rex block); starting claude without persistence" >&2
+  exec claude ${extra[@]+"${extra[@]}"}
+fi
+
+plan_args=(--block "$REX_BLOCK" --cwd "$PWD")
+[ -n "$name" ]    && plan_args+=(--name "$name")
+[ -n "$model" ]   && plan_args+=(--model "$model")
+[ -n "$prompt" ]  && plan_args+=(--prompt "$prompt")
+[ -n "$session" ] && plan_args+=(--session "$session")
+[ -n "$parent" ]  && plan_args+=(--parent "$parent")
+[ -n "$depth" ]   && plan_args+=(--depth "$depth")
+[ ${#extra[@]} -gt 0 ] && plan_args+=(-- ${extra[@]+"${extra[@]}"})
+
+plan="$("$RA" plan "${plan_args[@]}")" || {
+  echo "rex-agent: could not read agent state; starting claude without persistence" >&2
+  exec claude ${extra[@]+"${extra[@]}"}
+}
+eval "$plan"   # ACTION, SESSION_ID, CWD, MODEL, INITIAL_PROMPT, NAME, REASON, LAUNCHES (shell-quoted by rex-agents)
+
+args=()
+[ -n "$MODEL" ] && args+=(--model "$MODEL")
+args+=(${extra[@]+"${extra[@]}"})
+
+case "$ACTION" in
+  resume)
+    if [ -n "$CWD" ] && [ -d "$CWD" ]; then
+      cd "$CWD" || true
+    fi
+    echo "rex-agent: resuming ${NAME:-agent} (session ${SESSION_ID:0:8}) in $PWD"
+    args+=(--resume "$SESSION_ID")
+    [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT")
+    ;;
+  fresh)
+    echo "rex-agent: starting ${NAME:-agent} in $PWD"
+    [ -n "$INITIAL_PROMPT" ] && args+=("$INITIAL_PROMPT")
+    ;;
+  broken|*)
+    echo "rex-agent: ❌ cannot resume ${NAME:-agent}: ${REASON:-unknown reason}" >&2
+    echo "rex-agent: the record is marked broken. Run 'rex-agents status $REX_BLOCK' for details," >&2
+    echo "           or start a new agent in this tab with: rex-agent --name ${NAME:-agent}" >&2
+    exec "${SHELL:-/bin/zsh}" -l
+    ;;
+esac
+
+export REX_AGENT_NAME="${NAME:-}" REX_AGENT_LAUNCH="${LAUNCHES:-0}"
+# This is a top-level agent even when spawned from inside another Claude session: drop the
+# nested-session markers, or Claude Code treats it as a child session and keeps no transcript.
+unset CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED \
+      CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_PID CLAUDE_CODE_ENTRYPOINT
+"$RA" mark "$REX_BLOCK" --pid $$ >/dev/null 2>&1 || true
+# exec keeps claude as the block's direct child: Rex's SIGTERM/SIGHUP on shutdown reach it
+# unchanged, and every state write already happened inside the hooks, so nothing needs flushing.
+exec claude ${args[@]+"${args[@]}"}

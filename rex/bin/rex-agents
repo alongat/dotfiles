@@ -1,0 +1,742 @@
+#!/usr/bin/env python3
+"""rex-agents: track Claude Code agents running in Rex blocks so they survive a Rex restart.
+
+State: one JSON file per agent under $REX_AGENTS_STATE_DIR/agents/<block-uuid>.json
+(default ~/.local/state/rex-agents). Written atomically (temp file + rename), so the
+Claude Code hooks that update records never need a lock.
+
+Commands
+  list                      show every tracked agent
+  status ID                 show one agent's record and its last assistant message
+  spawn --name N --prompt P open a Rex tab running a new agent (or --session S to resume one)
+  send ID MESSAGE           type a message into an agent's tab
+  result ID                 wait until the agent is idle and print its last answer
+  wait ID [--state S...]    wait until the agent reaches a state
+  restore                   reopen tabs for agents whose block no longer exists
+  rm ID                     forget an agent (does not touch its transcript)
+  plan / mark / hook        used by the rex-agent launcher and by Claude Code hooks
+"""
+
+import argparse
+import glob
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+
+HOME = os.path.expanduser("~")
+STATE_DIR = os.environ.get("REX_AGENTS_STATE_DIR") or os.path.join(HOME, ".local", "state", "rex-agents")
+AGENTS_DIR = os.path.join(STATE_DIR, "agents")
+CONFIG_PATH = os.environ.get("REX_AGENTS_CONFIG") or os.path.join(HOME, ".config", "rex-agents", "config.json")
+LAUNCHER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rex-agent")
+DEFAULT_CONFIG = {"max_depth": 2, "max_children": 5}
+RESTART_PROMPT = "rex restarted; continue where you left off"
+# interrupted: claude went away without a clean exit (SIGHUP when the Rex server died)
+ACTIVE_STATES = {"starting", "running", "blocked", "idle", "interrupted"}
+MID_TURN_STATES = {"running", "blocked"}
+CLEAN_END_REASONS = {"exit", "logout", "prompt_input_exit", "clear", "bypass_permissions_disabled"}
+DEFAULT_STATE_DIR = os.path.join(HOME, ".local", "state", "rex-agents")
+REDIRECT_DIR = os.path.join(DEFAULT_STATE_DIR, "redirect")  # block uuid -> non-default state dir
+RELAUNCH_GUARD_SECONDS = 30
+REX_APP_BIN = os.path.join(
+    HOME, "Library", "Application Support", "com.superlogical.rex", "RexServer", "Versions", "Current",
+    "Rex Server.app", "Contents", "MacOS", "rex",
+)
+
+
+# ---------------------------------------------------------------- helpers
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def die(msg, code=1):
+    print(f"rex-agents: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config():
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        with open(CONFIG_PATH) as fh:
+            cfg.update(json.load(fh))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # a broken config must not take agents down
+        print(f"rex-agents: ignoring {CONFIG_PATH}: {exc}", file=sys.stderr)
+    for key in ("max_depth", "max_children"):
+        env = os.environ.get(f"REX_AGENTS_{key.upper()}")
+        if env:
+            cfg[key] = int(env)
+    return cfg
+
+
+def block_uuid(block_id):
+    """'block:01a1...' -> '01a1...'. Accepts either form."""
+    return block_id.split(":", 1)[1] if block_id and block_id.startswith("block:") else block_id
+
+
+def record_path(uuid):
+    return os.path.join(AGENTS_DIR, f"{uuid}.json")
+
+
+def read_record(uuid):
+    try:
+        with open(record_path(uuid)) as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+
+
+def write_record(rec):
+    os.makedirs(AGENTS_DIR, exist_ok=True)
+    rec["updated_at"] = now()
+    fd, tmp = tempfile.mkstemp(dir=AGENTS_DIR, prefix=".tmp-", suffix=".json")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(rec, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, record_path(rec["id"]))
+
+
+def update_record(uuid, **fields):
+    rec = read_record(uuid) or new_record(uuid)
+    rec.update(fields)
+    write_record(rec)
+    return rec
+
+
+def new_record(uuid):
+    return {
+        "id": uuid,
+        "block_id": f"block:{uuid}",
+        "name": uuid[-8:],
+        "session_id": None,
+        "transcript_path": None,
+        "cwd": None,
+        "model": None,
+        "claude_args": [],
+        "prompt": None,
+        "status": "new",
+        "prev_status": None,
+        "started_at": None,
+        "last_activity": None,
+        "parent_id": None,
+        "depth": 0,
+        "rex_session": None,
+        "rex_server": None,
+        "prompt_count": 0,
+        "stop_count": 0,
+        "broken_reason": None,
+        "last_message": None,
+    }
+
+
+def all_records():
+    recs = []
+    for path in sorted(glob.glob(os.path.join(AGENTS_DIR, "*.json"))):
+        try:
+            with open(path) as fh:
+                recs.append(json.load(fh))
+        except Exception:
+            continue
+    return recs
+
+
+def resolve(ident):
+    """Find one record by block id, uuid, uuid prefix/suffix, or name."""
+    if not ident:
+        die("missing agent id")
+    uuid = block_uuid(ident)
+    rec = read_record(uuid)
+    if rec:
+        return rec
+    matches = [r for r in all_records() if r["id"].startswith(uuid) or r["id"].endswith(uuid) or r.get("name") == ident]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        die(f"no agent matches {ident!r}")
+    die(f"{ident!r} is ambiguous: " + ", ".join(f"{r['name']} ({r['id'][-8:]})" for r in matches))
+
+
+def encode_cwd(cwd):
+    """Claude Code's project directory encoding: every non-alphanumeric byte becomes '-'."""
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def transcript_for(rec):
+    path = rec.get("transcript_path")
+    if path:
+        return path
+    if rec.get("session_id") and rec.get("cwd"):
+        return os.path.join(HOME, ".claude", "projects", encode_cwd(rec["cwd"]), f"{rec['session_id']}.jsonl")
+    return None
+
+
+def last_assistant_text(path, max_bytes=4_000_000):
+    """Last assistant text block in a Claude Code transcript, or None."""
+    if not path or not os.path.exists(path):
+        return None
+    size = os.path.getsize(path)
+    text = None
+    with open(path, "rb") as fh:
+        if size > max_bytes:
+            fh.seek(size - max_bytes)
+            fh.readline()
+        for raw in fh:
+            try:
+                entry = json.loads(raw)
+            except Exception:
+                continue
+            if entry.get("type") != "assistant":
+                continue
+            content = (entry.get("message") or {}).get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+                if parts:
+                    text = "\n".join(parts).strip()
+    return text
+
+
+def rex_bin():
+    found = shutil.which("rex")
+    if found:
+        return found
+    if os.path.exists(REX_APP_BIN):
+        return REX_APP_BIN
+    die("rex CLI not found on PATH")
+
+
+def rex(*args, server=None, check=True, timeout=30):
+    cmd = [rex_bin(), "--autostart=false"]
+    server = server or os.environ.get("REX_SERVER")
+    if server:
+        cmd += ["-S", server]
+    cmd += list(args)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if check and proc.returncode != 0:
+        die(f"{' '.join(shlex.quote(c) for c in cmd[1:])}\n{proc.stderr.strip()}")
+    return proc
+
+
+def rex_json(*args, server=None):
+    args = list(args)
+    # --json must precede the "--" that starts a block's command, or rex hands it to the command.
+    cut = args.index("--") if "--" in args else len(args)
+    args.insert(cut, "--json")
+    out = rex(*args, server=server).stdout
+    try:
+        return json.loads(out) if out.strip() else {}
+    except json.JSONDecodeError:
+        die(f"rex {' '.join(args[:cut])}: expected JSON, got: {out[:200]!r}")
+
+
+def live_block_ids(server=None):
+    ids = set()
+    for sess in rex_json("session", "list", server=server).get("sessions", []):
+        try:
+            blocks = rex_json("block", "ls", "-s", sess["session_id"], server=server).get("blocks", [])
+        except SystemExit:
+            continue
+        ids.update(block_uuid(b["block_id"]) for b in blocks)
+    return ids
+
+
+def is_done(rec):
+    return rec.get("status") == "idle" and rec.get("stop_count", 0) >= rec.get("prompt_count", 0)
+
+
+def public_status(rec):
+    """running / waiting / done / error, as the subagent contract names them."""
+    status = rec.get("status")
+    if status in ("broken", "ended", "stopped"):
+        return "error" if status == "broken" else "done"
+    if status == "blocked":
+        return "waiting"
+    if is_done(rec):
+        return "done"
+    return "running"
+
+
+def wait_for(uuid, predicate, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        rec = read_record(uuid)
+        if rec and predicate(rec):
+            return rec
+        if time.monotonic() > deadline:
+            return None
+        time.sleep(1)
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_plan(args):
+    """Called by the launcher. Decides fresh / resume / broken and records what it knows."""
+    uuid = block_uuid(args.block)
+    rec = read_record(uuid) or new_record(uuid)
+    if args.name:
+        rec["name"] = args.name
+    if args.cwd:
+        rec["cwd"] = args.cwd
+    if args.model:
+        rec["model"] = args.model
+    if args.prompt:
+        rec["prompt"] = args.prompt
+    if args.parent:
+        rec["parent_id"] = block_uuid(args.parent)
+    if args.depth is not None:
+        rec["depth"] = args.depth
+    if args.session:
+        rec["session_id"] = args.session
+    if args.extra:
+        rec["claude_args"] = args.extra
+    rec["rex_session"] = os.environ.get("REX_SESSION")
+    rec["rex_server"] = os.environ.get("REX_SERVER")
+    rec["prev_status"] = rec.get("status")
+    if not rec.get("started_at"):
+        rec["started_at"] = now()
+
+    action, initial = "fresh", rec.get("prompt") or ""
+    if rec.get("session_id"):
+        path = transcript_for(rec)
+        if path and os.path.exists(path):
+            action = "resume"
+            rec["transcript_path"] = path
+            was = rec.get("interrupted_from") if rec.get("prev_status") == "interrupted" else rec.get("prev_status")
+            initial = RESTART_PROMPT if was in MID_TURN_STATES else ""
+        else:
+            action = "broken"
+            rec["broken_reason"] = f"transcript missing: {path}"
+            initial = ""
+    rec["status"] = "broken" if action == "broken" else "starting"
+    rec["last_launch"] = now()
+    rec["launches"] = rec.get("launches", 0) + 1
+    rec["interrupted_from"] = None
+    write_record(rec)
+    # A restored block's shell finds the record through this pointer when the state dir is not the default.
+    if os.path.abspath(STATE_DIR) != DEFAULT_STATE_DIR:
+        os.makedirs(REDIRECT_DIR, exist_ok=True)
+        with open(os.path.join(REDIRECT_DIR, uuid), "w") as fh:
+            fh.write(STATE_DIR + "\n")
+    out = {
+        "ACTION": action,
+        "SESSION_ID": rec.get("session_id") or "",
+        "CWD": rec.get("cwd") or "",
+        "MODEL": rec.get("model") or "",
+        "INITIAL_PROMPT": initial,
+        "NAME": rec.get("name") or "",
+        "REASON": rec.get("broken_reason") or "",
+        "LAUNCHES": rec["launches"],
+    }
+    for key, val in out.items():
+        print(f"{key}={shlex.quote(str(val))}")
+
+
+def cmd_mark(args):
+    rec = resolve(args.id)
+    fields = {"last_activity": now()}
+    if args.status:
+        fields["prev_status"] = rec.get("status")
+        fields["status"] = args.status
+    if args.exit_code is not None:
+        fields["last_exit"] = args.exit_code
+    if args.pid is not None:
+        fields["pid"] = args.pid
+    update_record(rec["id"], **fields)
+
+
+def cmd_hook(_args):
+    """Claude Code hook entry point. Reads the hook JSON on stdin; never fails the session."""
+    block = os.environ.get("REX_BLOCK")
+    if not block:
+        return
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return
+    if payload.get("agent_id"):  # built-in Task subagents share the parent's block; ignore them
+        return
+    uuid = block_uuid(block)
+    rec = read_record(uuid) or new_record(uuid)
+    event = payload.get("hook_event_name")
+    # A claude that Rex's death is still tearing down can fire SessionEnd after the relaunch
+    # already wrote a newer record. The launcher stamps each claude with its launch number.
+    launch = os.environ.get("REX_AGENT_LAUNCH")
+    if launch and launch.isdigit() and int(launch) < rec.get("launches", 0):
+        return
+    stamp = now()
+    rec["last_activity"] = stamp
+    if payload.get("session_id"):
+        if rec.get("session_id") and rec["session_id"] != payload["session_id"]:
+            rec.setdefault("previous_session_ids", []).append(rec["session_id"])
+        rec["session_id"] = payload["session_id"]
+    if payload.get("transcript_path"):
+        rec["transcript_path"] = payload["transcript_path"]
+    if payload.get("cwd") and not rec.get("cwd"):
+        rec["cwd"] = payload["cwd"]
+    if payload.get("model"):
+        rec["model"] = payload["model"]
+    if not rec.get("rex_session") and os.environ.get("REX_SESSION"):
+        rec["rex_session"] = os.environ.get("REX_SESSION")
+    if not rec.get("started_at"):
+        rec["started_at"] = stamp
+
+    if event == "SessionStart":
+        rec["session_start_source"] = payload.get("source")
+        rec["last_session_start"] = stamp
+        if payload.get("source") != "compact":
+            rec["prev_status"] = rec.get("status")
+            rec["status"] = "idle"
+            rec["broken_reason"] = None
+    elif event == "UserPromptSubmit":
+        rec["prompt_count"] = rec.get("prompt_count", 0) + 1
+        rec["status"] = "running"
+        rec["last_prompt"] = (payload.get("prompt") or "")[:500]
+    elif event == "Stop":
+        rec["stop_count"] = rec.get("stop_count", 0) + 1
+        rec["status"] = "idle"
+        rec["last_message"] = (last_assistant_text(rec.get("transcript_path")) or "")[:2000] or rec.get("last_message")
+    elif event == "Notification":
+        kind = payload.get("notification_type")
+        if kind in ("permission_prompt", "elicitation_dialog"):
+            rec["status"] = "blocked"
+            rec["blocked_on"] = (payload.get("message") or "")[:500]
+        elif kind == "idle_prompt" and rec.get("status") == "blocked":
+            rec["status"] = "idle"
+    elif event == "SessionEnd":
+        reason = payload.get("reason")
+        rec["end_reason"] = reason
+        if reason in CLEAN_END_REASONS:
+            rec["prev_status"] = rec.get("status")
+            rec["status"] = "ended"
+        else:  # "other": the terminal went away (Rex died or the tab was closed); keep it resumable
+            rec["interrupted_from"] = rec.get("status")
+            rec["prev_status"] = rec.get("status")
+            rec["status"] = "interrupted"
+    write_record(rec)
+
+
+def cmd_should_resume(args):
+    """Exit 0 when a restored block's shell should hand itself back to the launcher."""
+    uuid = block_uuid(args.block)
+    rec = read_record(uuid)
+    if rec is None:
+        sys.exit(1)
+    if rec.get("status") not in ACTIVE_STATES:
+        print(f"{rec['name']}: {rec.get('status')}; not resuming")
+        sys.exit(1)
+    if not rec.get("session_id"):
+        print(f"{rec['name']}: no session id yet; not resuming")
+        sys.exit(1)
+    last = rec.get("last_launch")
+    started = rec.get("last_session_start") or ""
+    if last and started < last:  # the previous launch never reached SessionStart: claude is failing early
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+        except ValueError:
+            age = RELAUNCH_GUARD_SECONDS
+        if age < RELAUNCH_GUARD_SECONDS:
+            print(f"{rec['name']}: launched {int(age)}s ago; not relaunching (crash loop guard). "
+                  f"Run 'rex-agent' to retry.")
+            sys.exit(2)
+    print(f"{rec['name']}: {rec.get('status')} session {rec['session_id'][:8]}")
+
+
+def cmd_list(args):
+    recs = all_records()
+    if args.json:
+        print(json.dumps(recs, indent=2))
+        return
+    if not recs:
+        print("no agents tracked")
+        return
+    live = None
+    try:
+        live = live_block_ids()
+    except SystemExit:
+        pass
+    print(f"{'ID':9} {'NAME':28} {'STATUS':9} {'TAB':5} {'SESSION':10} {'DEPTH':5} {'LAST ACTIVITY':20} CWD")
+    for r in recs:
+        tab = "-" if live is None else ("open" if r["id"] in live else "gone")
+        sess = (r.get("session_id") or "")[:8]
+        name = r.get("name") or ""
+        if r.get("parent_id"):
+            name = "↳ " + name
+        print(f"{r['id'][-8:]:9} {name[:28]:28} {r.get('status') or '':9} {tab:5} {sess:10} {r.get('depth', 0):<5} "
+              f"{(r.get('last_activity') or '')[:19]:20} {r.get('cwd') or ''}")
+
+
+def cmd_status(args):
+    rec = resolve(args.id)
+    last = last_assistant_text(transcript_for(rec)) or rec.get("last_message")
+    out = {"state": public_status(rec), "last_message": last, **rec}
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return
+    print(f"{rec['name']} ({rec['id'][-8:]}): {public_status(rec)} [{rec.get('status')}]")
+    print(f"  session   {rec.get('session_id')}")
+    print(f"  cwd       {rec.get('cwd')}")
+    print(f"  model     {rec.get('model') or 'default'}")
+    print(f"  parent    {rec.get('parent_id') or '-'}  depth {rec.get('depth', 0)}")
+    print(f"  activity  {rec.get('last_activity')}")
+    if rec.get("broken_reason"):
+        print(f"  broken    {rec['broken_reason']}")
+    if rec.get("blocked_on") and rec.get("status") == "blocked":
+        print(f"  blocked   {rec['blocked_on']}")
+    if last:
+        print("  last message:")
+        for line in last.splitlines()[:40]:
+            print(f"    {line}")
+
+
+def spawn(name, prompt=None, cwd=None, model=None, session=None, parent=None, extra=None,
+          rex_session=None, server=None, timeout=90, label=None, focus=False):
+    cfg = load_config()
+    cwd = os.path.abspath(cwd or os.getcwd())
+    if not os.path.isdir(cwd):
+        die(f"cwd does not exist: {cwd}")
+    depth = 0
+    parent_rec = None
+    if parent:
+        parent_rec = read_record(block_uuid(parent))
+        depth = (parent_rec.get("depth", 0) if parent_rec else 0) + 1
+        if depth > cfg["max_depth"]:
+            die(f"nesting limit reached: depth {depth} > max_depth {cfg['max_depth']}")
+        running = [r for r in all_records()
+                   if r.get("parent_id") == block_uuid(parent) and r.get("status") in ACTIVE_STATES]
+        if len(running) >= cfg["max_children"]:
+            die(f"{parent_rec['name'] if parent_rec else parent} already has {len(running)} running subagents "
+                f"(max_children {cfg['max_children']})")
+    if label is None:
+        label = f"↳ {parent_rec['name']} / {name}" if parent_rec else name
+    rex_session = rex_session or os.environ.get("REX_SESSION")
+    if not rex_session:
+        sessions = rex_json("session", "list", server=server).get("sessions", [])
+        if not sessions:
+            die("no rex session to open a tab in; pass --rex-session")
+        rex_session = sessions[0]["session_id"]
+
+    launcher = [LAUNCHER, "--name", name]
+    if model:
+        launcher += ["--model", model]
+    if session:
+        launcher += ["--session", session]
+    if parent:
+        launcher += ["--parent", parent, "--depth", str(depth)]
+    if prompt:
+        launcher += ["--prompt", prompt]
+    if os.environ.get("REX_AGENTS_STATE_DIR"):
+        launcher += ["--state-dir", os.environ["REX_AGENTS_STATE_DIR"]]
+    if extra:
+        launcher += ["--", *extra]
+
+    created = rex_json("window", "new", "-s", rex_session, label, "-c", cwd, "--interactive", "--keep-open",
+                       f"--focus={'true' if focus else 'false'}", "--", *launcher, server=server)
+    block = created["block_ids"][0]
+    uuid = block_uuid(block)
+    # The launcher writes the record at once; the SessionStart hook fills in the session id.
+    rec = wait_for(uuid, lambda r: bool(r.get("session_id")) or r.get("status") == "broken", timeout)
+    if rec is None:
+        rec = read_record(uuid) or {"id": uuid}
+        rec["warning"] = f"no session id after {timeout}s; check the tab"
+    rec = dict(rec)
+    rec["window_id"] = created["window_id"]
+    if parent_rec:
+        rec["parent_name"] = parent_rec["name"]
+    return rec
+
+
+def cmd_spawn(args):
+    if not args.session and not args.prompt:
+        die("spawn needs --prompt (new agent) or --session (resume an existing Claude session)")
+    rec = spawn(args.name, prompt=args.prompt, cwd=args.cwd, model=args.model, session=args.session,
+                parent=args.parent, extra=args.extra, rex_session=args.rex_session, server=args.server,
+                timeout=args.timeout, focus=args.focus)
+    out = {k: rec.get(k) for k in ("id", "block_id", "name", "session_id", "cwd", "status", "window_id", "parent_id", "warning")}
+    print(json.dumps(out, indent=2))
+
+
+def cmd_send(args):
+    rec = resolve(args.id)
+    if rec.get("status") in ("ended", "broken", "stopped", "interrupted"):
+        die(f"{rec['name']} is {rec['status']}; nothing is listening in its tab")
+    message = args.message if args.message is not None else sys.stdin.read().rstrip("\n")
+    block = rec["block_id"]
+    server = args.server or rec.get("rex_server")
+    rex("send", "-b", block, message, server=server)
+    time.sleep(0.3)
+    rex("send-key", "-b", block, "enter", server=server)
+    if args.wait:
+        before = rec.get("prompt_count", 0)
+        if not wait_for(rec["id"], lambda r: r.get("prompt_count", 0) > before, 15):
+            print("rex-agents: message typed, but no UserPromptSubmit seen within 15s", file=sys.stderr)
+    print(f"sent to {rec['name']} ({rec['id'][-8:]})")
+
+
+def cmd_result(args):
+    rec = resolve(args.id)
+    final = wait_for(rec["id"], lambda r: is_done(r) or r.get("status") in ("ended", "broken", "blocked"), args.timeout)
+    if final is None:
+        die(f"{rec['name']} still running after {args.timeout}s", code=3)
+    text = last_assistant_text(transcript_for(final)) or final.get("last_message") or ""
+    if args.json:
+        print(json.dumps({"id": final["id"], "name": final["name"], "state": public_status(final),
+                          "status": final.get("status"), "result": text}, indent=2))
+        return
+    if final.get("status") == "blocked":
+        print(f"[{final['name']} is waiting on a prompt in its tab: {final.get('blocked_on', '')}]", file=sys.stderr)
+    print(text)
+    if final.get("status") == "blocked":
+        sys.exit(4)
+
+
+def cmd_wait(args):
+    rec = resolve(args.id)
+    states = set(args.state or ["done"])
+    final = wait_for(rec["id"], lambda r: public_status(r) in states or r.get("status") in states, args.timeout)
+    if final is None:
+        die(f"timeout after {args.timeout}s; {rec['name']} is {public_status(rec)}", code=3)
+    print(public_status(final))
+
+
+def cmd_restore(args):
+    live = live_block_ids(server=args.server)
+    todo = [r for r in all_records() if r.get("status") in ACTIVE_STATES and r["id"] not in live]
+    if not todo:
+        print("nothing to restore: every active agent still has a tab")
+        return
+    for rec in todo:
+        if not rec.get("session_id"):
+            print(f"skip {rec['name']}: no session id recorded")
+            continue
+        path = transcript_for(rec)
+        if not path or not os.path.exists(path):
+            update_record(rec["id"], status="broken", broken_reason=f"transcript missing: {path}")
+            print(f"broken {rec['name']}: transcript missing")
+            continue
+        if args.dry_run:
+            print(f"would reopen {rec['name']} ({rec['session_id'][:8]}) in {rec['cwd']}")
+            continue
+        new = spawn(rec["name"], cwd=rec["cwd"], model=rec.get("model"), session=rec["session_id"],
+                    parent=rec.get("parent_id"), extra=rec.get("claude_args"),
+                    rex_session=args.rex_session or rec.get("rex_session"), server=args.server)
+        update_record(rec["id"], status="stopped", superseded_by=new["id"])
+        print(f"reopened {rec['name']} as {new['id'][-8:]} (session {rec['session_id'][:8]})")
+
+
+def cmd_rm(args):
+    rec = resolve(args.id)
+    os.remove(record_path(rec["id"]))
+    print(f"forgot {rec['name']} ({rec['id'][-8:]}); transcript left in place")
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(prog="rex-agents", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--server", help="rex server address (default: $REX_SERVER)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("list", help="list tracked agents")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_list)
+
+    p = sub.add_parser("status", help="show one agent")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_status)
+
+    p = sub.add_parser("spawn", help="open a rex tab running a Claude Code agent")
+    p.add_argument("--name", required=True)
+    p.add_argument("--prompt", help="first prompt for a new agent")
+    p.add_argument("--session", help="existing Claude session id to resume instead of starting fresh")
+    p.add_argument("--cwd", help="working directory (default: current)")
+    p.add_argument("--model")
+    p.add_argument("--parent", default=os.environ.get("REX_BLOCK"),
+                   help="parent agent block (default: $REX_BLOCK, i.e. the calling agent)")
+    p.add_argument("--no-parent", action="store_true", help="spawn a top-level agent even from inside an agent")
+    p.add_argument("--rex-session", help="rex session to open the tab in (default: $REX_SESSION)")
+    p.add_argument("--focus", action="store_true", help="switch to the new tab")
+    p.add_argument("--timeout", type=int, default=90, help="seconds to wait for the session id")
+    p.add_argument("extra", nargs="*", help="extra claude arguments after --")
+    p.set_defaults(fn=cmd_spawn)
+
+    p = sub.add_parser("send", help="type a message into an agent's tab")
+    p.add_argument("id")
+    p.add_argument("message", nargs="?", help="text (default: stdin)")
+    p.add_argument("--wait", action="store_true", help="wait until Claude acknowledges the prompt")
+    p.set_defaults(fn=cmd_send)
+
+    p = sub.add_parser("result", help="wait for the agent to finish its turn and print its last message")
+    p.add_argument("id")
+    p.add_argument("--timeout", type=int, default=600)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_result)
+
+    p = sub.add_parser("wait", help="wait for a state: running, waiting, done, error, or a raw status")
+    p.add_argument("id")
+    p.add_argument("--state", action="append")
+    p.add_argument("--timeout", type=int, default=600)
+    p.set_defaults(fn=cmd_wait)
+
+    p = sub.add_parser("restore", help="reopen tabs for active agents whose block is gone")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--rex-session")
+    p.set_defaults(fn=cmd_restore)
+
+    p = sub.add_parser("rm", help="forget an agent record")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_rm)
+
+    p = sub.add_parser("plan", help="(launcher) decide fresh/resume/broken for a block")
+    p.add_argument("--block", required=True)
+    p.add_argument("--name")
+    p.add_argument("--cwd")
+    p.add_argument("--model")
+    p.add_argument("--prompt")
+    p.add_argument("--parent")
+    p.add_argument("--depth", type=int)
+    p.add_argument("--session")
+    p.add_argument("extra", nargs="*")
+    p.set_defaults(fn=cmd_plan)
+
+    p = sub.add_parser("mark", help="(launcher) update status fields")
+    p.add_argument("id")
+    p.add_argument("--status")
+    p.add_argument("--exit-code", type=int)
+    p.add_argument("--pid", type=int)
+    p.set_defaults(fn=cmd_mark)
+
+    p = sub.add_parser("hook", help="(Claude Code hook) consume a hook event from stdin")
+    p.set_defaults(fn=cmd_hook)
+
+    p = sub.add_parser("should-resume", help="(zsh startup) exit 0 if this block's agent should be relaunched")
+    p.add_argument("block")
+    p.set_defaults(fn=cmd_should_resume)
+
+    argv = sys.argv[1:]
+    args = ap.parse_args(argv)
+    if args.cmd == "spawn" and args.no_parent:
+        args.parent = None
+    if args.server:
+        os.environ["REX_SERVER"] = args.server
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except subprocess.TimeoutExpired as exc:
+        die(f"rex did not answer: {exc}")
