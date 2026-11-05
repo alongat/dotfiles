@@ -145,6 +145,35 @@ for pair in "$id_a:$WORD_A" "$id_b:$WORD_B"; do
   case "$answer" in *"$word"*) ok "$id recalled $word" ;; *) bad "$id answered: ${answer:-<nothing>}" ;; esac
 done
 
+say "Subagents: alpha spawns a child, the child spawns a grandchild, depth 3 is refused"
+child_json=$(REX_BLOCK="block:$id_a" REX_SESSION="$sess" "$RA" spawn --name child --cwd "$AGENT_CWD" --timeout 120 \
+  --prompt "Reply with exactly: child ready")
+id_c=$(echo "$child_json" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["id"])')
+sid_c=$(echo "$child_json" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("session_id") or "")')
+session_ids+=("$sid_c"); block_ids+=("$id_c")
+parent_ok=$("$RA" status "$id_c" --json | python3 -c 'import sys,json; d=json.load(sys.stdin); print("ok" if d["parent_id"]=="'"$id_a"'" and d["depth"]==1 else d)')
+[ "$parent_ok" = "ok" ] && ok "child records parent alpha, depth 1" || bad "child record wrong: $parent_ok"
+label=$(rex --autostart=false -S "$SOCK" window ls -s "$sess" --json | python3 -c 'import sys,json; print([w["label"] for w in json.load(sys.stdin)["windows"] if "child" in w["label"]][0])')
+[ "$label" = "↳ alpha / child" ] && ok "tab labelled '$label'" || bad "tab label is '$label'"
+"$RA" wait "$id_c" --state done --timeout 180 >/dev/null && ok "child finished" || bad "child did not finish"
+case "$("$RA" result "$id_c" --timeout 30)" in *"child ready"*) ok "parent collected the child's result" ;; *) bad "child result missing" ;; esac
+
+grand_json=$(REX_BLOCK="block:$id_c" REX_SESSION="$sess" "$RA" spawn --name grandchild --cwd "$AGENT_CWD" --timeout 120 \
+  --prompt "Reply with exactly: OK")
+id_g=$(echo "$grand_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+session_ids+=("$(echo "$grand_json" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("session_id") or "")')"); block_ids+=("$id_g")
+[ -n "$id_g" ] && ok "grandchild spawned at depth 2" || bad "grandchild failed"
+if REX_BLOCK="block:$id_g" REX_SESSION="$sess" "$RA" spawn --name toodeep --cwd "$AGENT_CWD" --prompt x 2>"$WORK/deep.err"; then
+  bad "depth 3 was allowed"
+else
+  grep -q "nesting limit" "$WORK/deep.err" && ok "depth 3 refused: $(cat "$WORK/deep.err")" || bad "depth 3 failed for another reason: $(cat "$WORK/deep.err")"
+fi
+if REX_AGENTS_MAX_CHILDREN=1 REX_BLOCK="block:$id_a" REX_SESSION="$sess" "$RA" spawn --name second --cwd "$AGENT_CWD" --prompt x 2>"$WORK/kids.err"; then
+  bad "max_children=1 was not enforced"
+else
+  grep -q "max_children" "$WORK/kids.err" && ok "max_children enforced" || bad "max_children failed for another reason: $(cat "$WORK/kids.err")"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "✅ restart test passed"; else echo "❌ restart test: $fails failure(s)"; fi
 exit "$fails"
