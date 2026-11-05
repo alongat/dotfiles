@@ -207,6 +207,25 @@ def last_assistant_text(path, max_bytes=4_000_000):
     return text
 
 
+def rex_server_alive(timeout=0.5):
+    """True when something accepts connections on this block's REX_SERVER unix socket."""
+    server = os.environ.get("REX_SERVER") or ""
+    if not server.startswith("unix://"):
+        return False
+    import socket
+    from urllib.parse import unquote
+    path = unquote(server[len("unix://"):])
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(path)
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
 def rex_bin():
     found = shutil.which("rex")
     if found:
@@ -358,7 +377,7 @@ def cmd_mark(args):
 def cmd_hook(_args):
     """Claude Code hook entry point. Reads the hook JSON on stdin; never fails the session."""
     block = os.environ.get("REX_BLOCK")
-    if not block:
+    if not block or os.environ.get("HERDR_ENV") == "1":  # herdr panes inherit REX_BLOCK when herdr runs in a rex tab
         return
     try:
         payload = json.load(sys.stdin)
@@ -422,10 +441,11 @@ def cmd_hook(_args):
     elif event == "SessionEnd":
         reason = payload.get("reason")
         rec["end_reason"] = reason
-        if reason in CLEAN_END_REASONS:
+        if reason in CLEAN_END_REASONS or rex_server_alive():
+            # a clean exit, or the terminal went away while Rex is still up: the tab was closed
             rec["prev_status"] = rec.get("status")
             rec["status"] = "ended"
-        else:  # "other": the terminal went away (Rex died or the tab was closed); keep it resumable
+        else:  # "other" and no Rex server answering: Rex died; keep the agent resumable
             rec["interrupted_from"] = rec.get("status")
             rec["prev_status"] = rec.get("status")
             rec["status"] = "interrupted"
