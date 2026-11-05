@@ -39,7 +39,8 @@ directory because the closed-source server owns and rewrites that tree.
 3. Claude Code hooks (installed in `~/.claude/settings.json`, no-ops unless `REX_BLOCK` is set)
    keep the record current: SessionStart writes the session ID and transcript path,
    UserPromptSubmit marks `running`, Stop marks `idle`, a permission Notification marks
-   `blocked`, SessionEnd marks `ended`.
+   `blocked`, PostToolUse clears `blocked` back to `running` (its shell guard only runs the
+   python while the record says blocked), SessionEnd marks `ended`.
 4. When Rex dies, each `claude` gets SIGHUP and its SessionEnd hook fires with reason
    `other`. The record becomes `interrupted` and remembers the status it had (`running`
    means mid-turn). A clean `/exit` gives reason `exit` and the record becomes `ended`.

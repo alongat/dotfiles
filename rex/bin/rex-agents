@@ -384,6 +384,8 @@ def cmd_hook(_args):
         rec["transcript_path"] = payload["transcript_path"]
     if payload.get("cwd") and not rec.get("cwd"):
         rec["cwd"] = payload["cwd"]
+        if rec.get("name") == uuid[-8:]:  # a plain `claude` typed in a rex shell: name it after its directory
+            rec["name"] = os.path.basename(payload["cwd"].rstrip("/")) or rec["name"]
     if payload.get("model"):
         rec["model"] = payload["model"]
     if not rec.get("rex_session") and os.environ.get("REX_SESSION"):
@@ -406,6 +408,10 @@ def cmd_hook(_args):
         rec["stop_count"] = rec.get("stop_count", 0) + 1
         rec["status"] = "idle"
         rec["last_message"] = (last_assistant_text(rec.get("transcript_path")) or "")[:2000] or rec.get("last_message")
+    elif event == "PostToolUse":
+        if rec.get("status") != "blocked":
+            return  # nothing to record; the hook guard normally skips this event entirely
+        rec["status"] = "running"  # a tool ran, so the permission prompt was answered
     elif event == "Notification":
         kind = payload.get("notification_type")
         if kind in ("permission_prompt", "elicitation_dialog"):

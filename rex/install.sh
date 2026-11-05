@@ -35,20 +35,24 @@ fi
 # Merge the hooks. The command is a marker: an entry whose command contains "rex-agents hook"
 # is ours, so re-running never duplicates it and never touches rex's or herdr's entries.
 HOOK_CMD="/bin/sh -c '[ -n \"\$REX_BLOCK\" ] || exit 0; exec \"$DOT/bin/rex-agents\" hook'"
-export HOOK_CMD SETTINGS
+# PostToolUse fires on every tool call, so it only runs the python when the record says blocked
+# (a tool running means the permission prompt was answered).
+POST_TOOL_CMD="/bin/sh -c '[ -n \"\$REX_BLOCK\" ] || exit 0; f=\"\${REX_AGENTS_STATE_DIR:-\$HOME/.local/state/rex-agents}/agents/\${REX_BLOCK#block:}.json\"; grep -q \"\\\"blocked\\\"\" \"\$f\" 2>/dev/null || exit 0; exec \"$DOT/bin/rex-agents\" hook'"
+export HOOK_CMD POST_TOOL_CMD SETTINGS
 changed=$(python3 - <<'PY'
 import json, os, shutil, time
 path = os.environ["SETTINGS"]
 cmd = os.environ["HOOK_CMD"]
+post = os.environ["POST_TOOL_CMD"]
 with open(path) as fh:
     settings = json.load(fh)
 hooks = settings.setdefault("hooks", {})
 changed = False
-for event in ("SessionStart", "UserPromptSubmit", "Stop", "Notification", "SessionEnd"):
+for event in ("SessionStart", "UserPromptSubmit", "Stop", "Notification", "SessionEnd", "PostToolUse"):
     entries = hooks.setdefault(event, [])
-    if any("rex-agents hook" in h.get("command", "") for e in entries for h in e.get("hooks", [])):
+    if any("rex-agents" in h.get("command", "") for e in entries for h in e.get("hooks", [])):
         continue
-    entries.append({"hooks": [{"type": "command", "command": cmd, "timeout": 5}]})
+    entries.append({"hooks": [{"type": "command", "command": post if event == "PostToolUse" else cmd, "timeout": 5}]})
     changed = True
 if changed:
     backup = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
