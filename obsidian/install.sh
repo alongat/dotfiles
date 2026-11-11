@@ -2,7 +2,7 @@
 
 set -e
 
-ICLOUD_VAULT="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/obsidian-second-brain"
+ICLOUD_VAULT="$HOME/obsidian-second-brain"
 VAULT_LINK="$HOME/.obsidian-vault"
 
 echo "› Setting up Obsidian vault symlink"

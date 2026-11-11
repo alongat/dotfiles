@@ -104,3 +104,8 @@ fi
 # Torq AI dev tools plugin root (used by skill scripts)
 export CLAUDE_PLUGIN_ROOT="/Users/alongat/Code/torqio/ai-dev-tools/claude/plugins/torq-observability"
 source "/Users/alongat/Code/torqio/app/local_env/app_dotfile.sh"
+
+# Rex: keep the server's rex CLI first on PATH (must stay last, after all PATH changes)
+if [ -n "$REX_BIN_DIR" ]; then
+  export PATH="$REX_BIN_DIR:$PATH"
+fi

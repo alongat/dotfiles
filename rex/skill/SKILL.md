@@ -1,13 +1,18 @@
 ---
 name: rex-agents
-description: Start, watch and message coding-agent subagents that run as Rex tabs (Claude Code, Codex or OpenCode) with the rex-agents CLI. Use when the user asks for a subagent, a background agent, or to "use rex to start" an agent while REX_BLOCK is set.
+description: Start, watch and message coding-agent subagents that run as Rex tabs (Claude Code, Codex or OpenCode) with the rex-agents CLI. Use whenever REX_BLOCK is set and a subagent would help, whether the user asked for one or you decided to delegate (parallel work, a side task, a wide search). Replaces the built-in Agent tool inside Rex.
 ---
 
 # rex-agents: subagents as Rex tabs
 
-When the user asks for a subagent while you run inside a Rex tab (`REX_BLOCK` is set), start it
-with the `rex-agents` CLI instead of a built-in subagent tool. Each subagent is a real tab that
-survives a Rex restart, and its tab is titled `↳ <your name> / <sub name>`.
+Inside a Rex tab (`REX_BLOCK` is set), start every subagent with the `rex-agents` CLI instead of
+the built-in Agent tool. That includes the ones you decide on yourself, not only the ones the user
+asks for. Each subagent is a real tab the user can watch, it survives a Rex restart, and its tab
+is titled `↳ <your name> / <sub name>`.
+
+Delegate when the work splits into independent parts, when a side task shouldn't block the main
+thread, or when answering means reading across many files. Run independent subagents in parallel
+and collect each with `result`.
 
 ```sh
 rex-agents spawn --name <short-name> --prompt "<self-contained prompt>"
