@@ -57,7 +57,3 @@ for f in "$VAULT/Skills/commands"/*.md; do
   [ -e "$f" ] || continue        # skips the dead circular links
   link "$f" "$CLAUDE/commands/$(basename "$f")"
 done
-
-echo
-echo "› Done. Torq plugins are installed separately via:"
-echo "    claude plugin marketplace add ~/Code/torqio/ai-dev-tools"

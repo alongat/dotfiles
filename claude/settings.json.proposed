@@ -14,24 +14,8 @@
     ]
   },
   "enabledPlugins": {
-    "torq-observability@torq-ai-dev-tools": true,
-    "hypersoc@torq-ai-dev-tools": true,
-    "developer-workflow@torq-ai-dev-tools": true,
-    "torq-recruiting@torq-ai-dev-tools": true,
-    "torq-dashboard-builder@torq-ai-dev-tools": true,
-    "torq-data-analyst@torq-ai-dev-tools": true,
-    "nexus@torq-ai-dev-tools": true,
-    "torq-autoresearch@torq-ai-dev-tools": true,
-    "torq-infra@torq-ai-dev-tools": true,
-    "torq-ai-research@torq-ai-dev-tools": true
   },
   "extraKnownMarketplaces": {
-    "torq-ai-dev-tools": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/alongat/Code/torqio/ai-dev-tools"
-      }
-    }
   },
   "effortLevel": "high",
   "theme": "auto",

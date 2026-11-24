@@ -74,16 +74,6 @@ install:
 	if [ $$failed_count -gt 0 ]; then exit 1; fi
 	@echo "› Installation completed successfully"
 
-install-private:
-	@if [ -f torq/Brewfile.torq ]; then \
-		echo "› Installing private (Torq) packages..."; \
-		brew bundle --file=torq/Brewfile.torq; \
-	fi
-	@if [ -f torq/install.sh ]; then \
-		echo "› Running private install script..."; \
-		sh torq/install.sh; \
-	fi
-
 clean:
 	@echo "› Cleaning broken symlinks"
 	@$(foreach src,$(DOTFILES), \
