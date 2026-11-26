@@ -1,0 +1,2 @@
+# Base config for markdownlint-cli2 in nvim. A repo's own config still applies on top.
+MD013: false
